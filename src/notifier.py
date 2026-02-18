@@ -1,5 +1,12 @@
 """
 Telegram Notifier — sends trade signals to Telegram.
+
+Enhanced with:
+  - Signal grade (A+/A/B/C/D)
+  - Composite score display
+  - Confluence factors breakdown
+  - Derivatives context (funding rate, bias)
+  - Pump analysis details
 """
 
 import asyncio
@@ -21,11 +28,20 @@ SCENARIO_LABELS = {
 }
 CONFIRM_ICON = {True: "\u2705", False: "\u274c"}
 
+GRADE_EMOJI = {
+    "A+": "\U0001f31f",  # Star
+    "A": "\U0001f7e2",   # Green circle
+    "B": "\U0001f7e1",   # Yellow circle
+    "C": "\U0001f7e0",   # Orange circle
+    "D": "\U0001f534",   # Red circle
+}
+
 
 def format_signal(signal: Signal) -> str:
-    """Format a Signal into a Telegram message."""
+    """Format a Signal into a rich Telegram message."""
     dir_emoji = DIRECTION_EMOJI.get(signal.direction, "")
     scenario_label = SCENARIO_LABELS.get(signal.scenario, signal.scenario)
+    grade_emoji = GRADE_EMOJI.get(signal.signal_grade, "")
 
     conf = signal.confirmations
     conf_lines = (
@@ -37,18 +53,44 @@ def format_signal(signal: Signal) -> str:
         f"  {CONFIRM_ICON[conf.get('confluence', False)]} \u041a\u043e\u043d\u0444\u043b\u044e\u0435\u043d\u0446\u0438\u044f"
     )
 
+    # Confluence details
+    confluence_detail = ""
+    if signal.confluence and signal.confluence.factors:
+        factors = ", ".join(signal.confluence.factors)
+        confluence_detail = f"\n\U0001f4cd <b>\u041a\u043e\u043d\u0444\u043b\u044e\u0435\u043d\u0446\u0438\u044f:</b> {factors}"
+
+    # Derivatives context
+    derivatives_detail = ""
+    if signal.derivatives and signal.derivatives.reason:
+        fund_icon = "\u26a0\ufe0f" if signal.derivatives.is_warning else "\u2705"
+        derivatives_detail = f"\n{fund_icon} <b>\u0424\u0430\u043d\u0434\u0438\u043d\u0433:</b> {signal.derivatives.reason}"
+
+    # Pump info
+    pump_detail = ""
+    if signal.pump_analysis and signal.pump_analysis.is_pump:
+        pump_detail = f"\n\u26a1 <b>\u041f\u0430\u043c\u043f:</b> {signal.pump_analysis.reason}"
+
+    # Size warning
     size_label = ""
     if signal.size_multiplier < 1.0:
         pct = int(signal.size_multiplier * 100)
         size_label = f"\n\u26a0\ufe0f \u0420\u0430\u0437\u043c\u0435\u0440 \u043f\u043e\u0437\u0438\u0446\u0438\u0438: {pct}% \u043e\u0442 \u0441\u0442\u0430\u043d\u0434\u0430\u0440\u0442\u0430"
 
+    # Score bar
+    score = signal.composite_score
+    bar_filled = int(score / 10)
+    bar_empty = 10 - bar_filled
+    score_bar = "\u2588" * bar_filled + "\u2591" * bar_empty
+
     msg = (
-        f"{dir_emoji} <b>{signal.direction} {signal.symbol}</b>\n"
+        f"{dir_emoji} <b>{signal.direction} {signal.symbol}</b>  "
+        f"{grade_emoji} <b>Grade: {signal.signal_grade}</b>\n"
         f"\n"
         f"\U0001f3af <b>\u0421\u0446\u0435\u043d\u0430\u0440\u0438\u0439:</b> {scenario_label}\n"
         f"\U0001f4ca <b>\u041f\u043e\u0434\u0442\u0432\u0435\u0440\u0436\u0434\u0435\u043d\u0438\u044f:</b> {signal.num_confirmations}/5\n"
         f"{conf_lines}\n"
         f"\n"
+        f"\U0001f4af <b>\u0421\u043a\u043e\u0440:</b> [{score_bar}] {score:.0f}/100\n"
         f"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
         f"\U0001f4b0 <b>\u0412\u0445\u043e\u0434:</b>    {signal.entry_price}\n"
         f"\U0001f6d1 <b>\u0421\u0442\u043e\u043f:</b>     {signal.stop_loss}  ({signal.risk_pct:.2%})\n"
@@ -62,6 +104,9 @@ def format_signal(signal: Signal) -> str:
         f"(\u0443\u0433\u043e\u043b {signal.level_angle}\u00b0)\n"
         f"\u2696\ufe0f \u041f\u043b\u0435\u0447\u043e: {signal.leverage}x"
         f"{size_label}\n"
+        f"{confluence_detail}"
+        f"{derivatives_detail}"
+        f"{pump_detail}\n"
         f"\n"
         f"\U0001f5c2 <b>\u0422\u0440\u0435\u043d\u0434\u044b:</b> 4H={signal.trend_4h} | "
         f"1H={signal.trend_1h} | 15m={signal.trend_15m}\n"
@@ -91,10 +136,10 @@ class TelegramNotifier:
                 text=msg,
                 parse_mode=ParseMode.HTML,
             )
-            logger.info(f"Signal sent: {signal.direction} {signal.symbol}")
+            logger.info(f"Signal sent: {signal.direction} {signal.symbol} [{signal.signal_grade}]")
         except Exception as e:
             logger.error(f"Failed to send Telegram message: {e}")
-            print(msg)  # Fallback to console
+            print(msg)
 
     async def send_status(self, text: str):
         """Send a status/info message."""

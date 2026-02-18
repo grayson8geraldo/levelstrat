@@ -1,8 +1,12 @@
 """
-Signal Engine — Triple Confirmation system.
+Signal Engine — Enhanced Triple Confirmation system.
 
-Evaluates all 5 confirmations and generates trade signals
-when 3+ are met.
+Evaluates all confirmations and generates trade signals
+when criteria are met. Now includes:
+  - Confluence scoring (Fibonacci, horizontal, VPOC, round numbers)
+  - Derivatives context (funding rate, OI)
+  - Pump-specific validation
+  - Weighted composite scoring
 """
 
 import pandas as pd
@@ -21,6 +25,9 @@ from src.config import (
 from src.diagonal_levels import DiagonalLevel, is_price_near_level
 from src.candle_patterns import detect_patterns, get_best_pattern
 from src.indicators import detect_rsi_divergence, get_trend_direction
+from src.confluence import analyze_confluence, ConfluenceResult
+from src.derivatives_filter import analyze_derivatives, DerivativesContext
+from src.pump_trading import detect_pump, PumpAnalysis
 
 logger = logging.getLogger(__name__)
 
@@ -52,6 +59,54 @@ class Signal:
     trend_1h: str = ""
     trend_15m: str = ""
     timestamp: str = ""
+    # Enhanced fields
+    composite_score: float = 0.0      # Weighted overall score (0-100)
+    confluence: ConfluenceResult = field(default_factory=ConfluenceResult)
+    derivatives: DerivativesContext = field(default_factory=DerivativesContext)
+    pump_analysis: PumpAnalysis = field(default_factory=PumpAnalysis)
+    signal_grade: str = ""            # "A+", "A", "B", "C"
+
+
+def _compute_composite_score(
+    num_confirmations: int,
+    level_strength: float,
+    confluence_score: float,
+    derivatives_adj: float,
+    regime_adj: float,
+) -> float:
+    """
+    Compute weighted composite score for the signal.
+
+    Components:
+      - Confirmations: 30% weight (3/5=60, 4/5=80, 5/5=100)
+      - Level strength: 25% weight (0-100 from diagonal level detector)
+      - Confluence: 25% weight (0-100 from confluence analyzer)
+      - Derivatives: 10% weight (adjustment from funding/OI)
+      - Market regime: 10% weight (session, volatility)
+
+    Returns 0-100 composite score.
+    """
+    conf_score = min(num_confirmations / 5.0 * 100, 100) * 0.30
+    level_score = min(level_strength, 100) * 0.25
+    confl_score = min(confluence_score, 100) * 0.25
+    deriv_score = max(0, min(50 + derivatives_adj, 100)) * 0.10
+    regime_score = max(0, min(50 + regime_adj, 100)) * 0.10
+
+    total = conf_score + level_score + confl_score + deriv_score + regime_score
+    return min(round(total, 1), 100)
+
+
+def _grade_signal(score: float) -> str:
+    """Assign a letter grade based on composite score."""
+    if score >= 80:
+        return "A+"
+    elif score >= 65:
+        return "A"
+    elif score >= 50:
+        return "B"
+    elif score >= 35:
+        return "C"
+    return "D"
 
 
 def evaluate_signal(
@@ -63,11 +118,15 @@ def evaluate_signal(
     trend_4h: str,
     trend_1h: str,
     timeframe: str = "15m",
+    funding_rate: float | None = None,
+    open_interest: float | None = None,
+    regime_adjustment: float = 0.0,
 ) -> Signal | None:
     """
-    Evaluate all 5 confirmations for a potential signal.
+    Evaluate all confirmations for a potential signal.
 
     Returns Signal if 3+ confirmations met, else None.
+    Now includes confluence analysis, derivatives context, and composite scoring.
     """
     if df_working is None or len(df_working) < 20:
         return None
@@ -75,42 +134,41 @@ def evaluate_signal(
         return None
 
     last_w = df_working.iloc[-1]
-    last_e = df_entry.iloc[-1]
     current_price = float(last_w["close"])
     candle_idx = len(df_working) - 1
 
-    # Determine trade direction based on level type and scenario
+    # Determine trade direction based on level type
     if level.level_type == "support":
         direction = "LONG"
     else:
         direction = "SHORT"
 
-    # For pump scenario, we SHORT on deflation (from resistance)
+    # For pump scenario, SHORT on deflation from resistance
     if scenario == "pump" and level.level_type == "resistance":
         direction = "SHORT"
 
     confirmations = {}
 
-    # ── CONFIRMATION 1: Diagonal Level Touch ──────────────
+    # ── CONFIRMATION 1: Diagonal Level Touch (mandatory) ─────
     near_level = is_price_near_level(current_price, level, candle_idx, timeframe)
     confirmations["diagonal_level"] = near_level
 
     if not near_level:
-        return None  # Must be near level (mandatory)
+        return None
 
-    # ── CONFIRMATION 2: Candle Pattern ────────────────────
+    # ── CONFIRMATION 2: Candle Pattern ───────────────────────
     patterns = detect_patterns(df_entry)
     desired_dir = "bullish" if direction == "LONG" else "bearish"
     best_pattern = get_best_pattern(patterns, desired_dir)
     confirmations["candle_pattern"] = best_pattern is not None
 
-    # ── CONFIRMATION 3: Volume ────────────────────────────
+    # ── CONFIRMATION 3: Volume ───────────────────────────────
     vol_ratio = float(last_w.get("volume_ratio", 0))
     confirmations["volume"] = vol_ratio >= VOLUME_SURGE_MULT
 
-    # ── CONFIRMATION 4: Indicator (RSI + MACD) ────────────
+    # ── CONFIRMATION 4: Indicator (RSI + MACD + Divergence) ──
     rsi = float(last_w.get(f"RSI_{RSI_PERIOD}", 50))
-    macd_hist_col = [c for c in df_working.columns if "MACDh" in c or "MACD_hist" in c.lower() or c.startswith("MACDh")]
+    macd_hist_col = [c for c in df_working.columns if "MACDh" in c or "MACD_hist" in c.lower()]
     macd_hist = 0
     if macd_hist_col:
         macd_hist = float(last_w.get(macd_hist_col[0], 0))
@@ -118,7 +176,6 @@ def evaluate_signal(
     indicator_ok = False
     if direction == "LONG":
         indicator_ok = (rsi < 45 or macd_hist > 0)
-        # RSI divergence is a strong bonus
         div = detect_rsi_divergence(df_working)
         if div == "bullish":
             indicator_ok = True
@@ -130,43 +187,41 @@ def evaluate_signal(
 
     confirmations["indicator"] = indicator_ok
 
-    # ── CONFIRMATION 5: Confluence ────────────────────────
-    confluence = False
-    # Check EMA confluence
-    for ema_col in [f"EMA_{EMA_SLOW}", f"EMA_{EMA_GLOBAL}"]:
-        ema_val = last_w.get(ema_col)
-        if ema_val is not None and not pd.isna(ema_val):
-            level_price = level.price_at(candle_idx)
-            if level_price > 0:
-                dist = abs(float(ema_val) - level_price) / level_price
-                if dist < 0.003:  # Within 0.3%
-                    confluence = True
-                    break
-
-    # Check round number confluence
+    # ── CONFIRMATION 5: Confluence (enhanced) ────────────────
     level_price = level.price_at(candle_idx)
-    if level_price > 0:
-        magnitude = 10 ** max(0, int(np.log10(level_price)) - 1)
-        if magnitude > 0 and (level_price % magnitude) / magnitude < 0.02:
-            confluence = True
+    confluence = analyze_confluence(level_price, df_working, df_working)
+    confirmations["confluence"] = confluence.score >= 20  # At least one factor
 
-    confirmations["confluence"] = confluence
-
-    # ── Count confirmations ───────────────────────────────
+    # ── Count confirmations ──────────────────────────────────
     num_conf = sum(1 for v in confirmations.values() if v)
     if num_conf < MIN_CONFIRMATIONS:
         return None
 
-    # ── Compute entry, stop, targets ──────────────────────
+    # ── Derivatives context check ────────────────────────────
+    deriv_ctx = analyze_derivatives(funding_rate, open_interest, direction)
+
+    # Kill switch: extreme funding blocks all trades
+    if deriv_ctx.is_extreme:
+        logger.info(f"  {symbol}: blocked by derivatives kill switch — {deriv_ctx.reason}")
+        return None
+
+    # ── Pump validation (if pump scenario) ───────────────────
+    pump = PumpAnalysis()
+    if scenario == "pump":
+        pump = detect_pump(df_working, timeframe)
+        if pump.is_pump and not pump.is_tradeable:
+            logger.info(f"  {symbol}: pump not tradeable — {pump.reason}")
+            return None
+
+    # ── Compute entry, stop, targets ─────────────────────────
     atr = float(last_w.get(f"ATR_{ATR_PERIOD}", 0))
     if atr <= 0:
         return None
 
     zone_pct = TOUCH_ZONE_PCT.get(timeframe, 0.0015)
-    level_price = level.price_at(candle_idx)
 
     if direction == "LONG":
-        entry_price = level_price  # Enter at trendline
+        entry_price = level_price
         stop_loss = level_price * (1 - zone_pct) - atr * STOP_ATR_MULT
         stop_dist = entry_price - stop_loss
         tp1 = entry_price + stop_dist * TP1_R
@@ -182,7 +237,7 @@ def evaluate_signal(
 
     risk_pct = stop_dist / entry_price if entry_price > 0 else 0
 
-    # ── Size multiplier based on scenario ─────────────────
+    # ── Size multiplier based on scenario ────────────────────
     trend_15m = get_trend_direction(df_working)
     is_counter_trend = (
         (direction == "LONG" and trend_1h == "bearish") or
@@ -197,7 +252,17 @@ def evaluate_signal(
     elif scenario == "new_listing":
         size_mult = NEW_LISTING_SIZE_MULT
 
-    # ── Build signal ──────────────────────────────────────
+    # ── Composite score ──────────────────────────────────────
+    composite = _compute_composite_score(
+        num_confirmations=num_conf,
+        level_strength=level.strength,
+        confluence_score=confluence.score,
+        derivatives_adj=deriv_ctx.score_adjustment,
+        regime_adj=regime_adjustment,
+    )
+    grade = _grade_signal(composite)
+
+    # ── Build signal ─────────────────────────────────────────
     signal = Signal(
         symbol=symbol,
         direction=direction,
@@ -208,7 +273,7 @@ def evaluate_signal(
         tp2=round(tp2, 6),
         tp3=round(tp3, 6),
         risk_pct=round(risk_pct, 5),
-        rr_ratio=round(TP2_R, 1),  # Average target is TP2
+        rr_ratio=round(TP2_R, 1),
         leverage=RECOMMENDED_LEVERAGE,
         size_multiplier=size_mult,
         confirmations=confirmations,
@@ -223,6 +288,11 @@ def evaluate_signal(
         trend_1h=trend_1h,
         trend_15m=trend_15m,
         timestamp=str(last_w.name) if hasattr(last_w, "name") else "",
+        composite_score=composite,
+        confluence=confluence,
+        derivatives=deriv_ctx,
+        pump_analysis=pump,
+        signal_grade=grade,
     )
 
     return signal

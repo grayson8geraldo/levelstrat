@@ -101,6 +101,27 @@ PUMP_MIN_CONSECUTIVE_CANDLES = 5     # 5+ same-direction candles
 PUMP_DEFLATION_MIN_RETRACE = 0.03    # 3% retrace to confirm deflation
 PUMP_MAX_AGE_HOURS = 24              # Don't trade pumps older than 24h
 
+# ── Confluence ─────────────────────────────────────────────
+CONFLUENCE_FIB_BONUS = 25            # Score bonus for Fibonacci alignment
+CONFLUENCE_HORIZONTAL_BONUS = 20     # Score bonus for horizontal S/R
+CONFLUENCE_VPOC_BONUS = 20           # Score bonus for Volume POC
+CONFLUENCE_ROUND_BONUS = 15          # Score bonus for round number
+CONFLUENCE_EMA_BONUS = 20            # Score bonus for EMA proximity
+
+# ── Derivatives Filter ────────────────────────────────────
+FUNDING_EXTREME_THRESHOLD = 0.001    # 0.1% = crowded trade
+FUNDING_KILL_SWITCH = 0.002          # 0.2% = no trades allowed
+
+# ── Market Regime ─────────────────────────────────────────
+VOL_EXTREME_THRESHOLD = 0.04        # 4% ATR/price = extreme volatility
+MACRO_BLACKOUT_MINUTES = 30          # No trades near macro events
+BTC_CRASH_THRESHOLD = -0.05          # -5% BTC = avoid alt trades
+
+# ── Retry / Resilience ────────────────────────────────────
+API_MAX_RETRIES = 3                  # Max retry attempts
+API_RETRY_BASE_DELAY = 2            # Base delay in seconds (exponential)
+
 # ── Scanner ────────────────────────────────────────────────
 SCAN_INTERVAL_SECONDS = 60           # Scan every 60 seconds
 TOP_COINS_TO_SCAN = 50               # Scan top 50 coins by volume
+DASHBOARD_INTERVAL_HOURS = 4         # Send dashboard every N hours
