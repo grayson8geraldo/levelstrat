@@ -161,9 +161,10 @@ def main():
             sys.exit(1)
         idx = sys.argv.index("--backtest")
         if idx + 1 < len(sys.argv):
-            symbol = sys.argv[idx + 1]
-            # Normalize symbol format
+            symbol = sys.argv[idx + 1].upper()
+            # Normalize: BTCUSDT -> BTC/USDT:USDT
             if "/" not in symbol:
+                symbol = symbol.replace("USDT", "")
                 symbol = f"{symbol}/USDT:USDT"
             run_backtest(symbol)
         else:
