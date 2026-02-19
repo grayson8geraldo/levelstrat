@@ -46,6 +46,7 @@ from src.risk_tracker import RiskTracker
 from src.trade_journal import TradeJournal
 from src.market_regime import analyze_market_regime
 from src.performance import PerformanceDashboard
+from src.position_monitor import PositionMonitor
 
 logger = logging.getLogger(__name__)
 
@@ -61,6 +62,9 @@ class DLSScanner:
         self.journal = TradeJournal()
         self.dashboard = PerformanceDashboard(
             self.notifier, self.journal, self.risk_tracker
+        )
+        self.monitor = PositionMonitor(
+            self.fetcher, self.risk_tracker, self.journal, self.notifier
         )
         # Dedup: symbol+direction+level_bucket → (timestamp, score)
         self._sent_signals: dict[str, tuple[float, float]] = {}
@@ -101,7 +105,11 @@ class DLSScanner:
         logger.info("=" * 60)
         logger.info(f"Starting scan cycle #{self._scan_count}...")
 
-        # Step 0: Check risk limits
+        # Step 0a: Check open positions (every POSITION_CHECK_INTERVAL)
+        if self.monitor.should_check():
+            self.monitor.check_all()
+
+        # Step 0b: Check risk limits
         risk_state = self.risk_tracker.check_can_trade()
         if not risk_state.can_trade:
             # For loss limits / cooldown — block entirely
@@ -325,7 +333,7 @@ class DLSScanner:
         funding_rate = getattr(signal, '_funding_rate', None)
 
         # Log to journal
-        self.journal.log_signal(
+        journal_id = self.journal.log_signal(
             signal,
             confluence_score=signal.confluence.score,
             confluence_factors=signal.confluence.factors,
@@ -336,6 +344,10 @@ class DLSScanner:
 
         # Track in risk manager
         self.risk_tracker.record_signal(signal)
+
+        # Open virtual position for auto-tracking
+        signal._timeframe = TF_WORKING
+        self.monitor.open_position(signal, journal_id)
 
         # Send signal!
         logger.info(
@@ -354,10 +366,10 @@ class DLSScanner:
         self.notifier.start_callback_listener()
 
         self.notifier.send_status_sync(
-            "\U0001f680 <b>DLS Scanner v2.1 запущен</b>\n\n"
+            "\U0001f680 <b>DLS Scanner v2.2 запущен</b>\n\n"
             "\u2705 Возможности:\n"
             "  \u2022 Ранжирование сигналов (лучшие первые)\n"
-            "  \u2022 Кнопки закрытия позиций в Telegram\n"
+            "  \u2022 Авто-трекинг позиций (TP/SL/time stop)\n"
             "  \u2022 Конфлюенция (Fib + горизонтальные + VPOC)\n"
             "  \u2022 Фандинг + OI фильтр\n"
             "  \u2022 Риск-трекер (дневные/недельные лимиты)\n"
