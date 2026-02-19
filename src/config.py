@@ -33,15 +33,15 @@ CANDLE_LIMIT = 200                    # Number of candles to fetch per TF
 # ── Diagonal Level Detection ──────────────────────────────
 MIN_TOUCHES = 3                       # Minimum touches for valid level
 TOUCH_ZONE_PCT = {                    # Touch zone width by timeframe
-    "1m": 0.0005,
-    "5m": 0.0010,
-    "15m": 0.0015,
-    "1h": 0.0025,
-    "4h": 0.0040,
+    "1m": 0.0015,
+    "5m": 0.0025,
+    "15m": 0.0040,                    # Was 0.0015 — too tight, 0 signals
+    "1h": 0.0050,
+    "4h": 0.0060,
 }
 MIN_CANDLES_BETWEEN_TOUCHES = 5       # Min candles between touches
-MIN_BOUNCE_PCT = 0.003                # 0.3% min bounce after touch
-MIN_ANGLE_DEG = 15                    # Min trendline angle
+MIN_BOUNCE_PCT = 0.002                # 0.2% min bounce after touch (was 0.3%)
+MIN_ANGLE_DEG = 10                    # Min trendline angle (was 15)
 MAX_ANGLE_DEG = 70                    # Max trendline angle (>70 = pump)
 SWING_LOOKBACK = 3                    # Candles left/right for swing detection
 
@@ -66,8 +66,8 @@ BB_PERIOD = 20
 BB_STD = 2.0
 
 VOLUME_MA_PERIOD = 20
-VOLUME_SURGE_MULT = 1.5              # 150% of MA for bounce
-VOLUME_BREAKOUT_MULT = 2.0           # 200% of MA for breakout
+VOLUME_SURGE_MULT = 1.2              # 120% of MA for bounce (was 1.5 — too strict)
+VOLUME_BREAKOUT_MULT = 1.8           # 180% of MA for breakout
 
 # ── Entry Rules ────────────────────────────────────────────
 MIN_CONFIRMATIONS = 3                 # Minimum 3 out of 5 confirmations
@@ -120,8 +120,10 @@ BTC_CRASH_THRESHOLD = -0.05          # -5% BTC = avoid alt trades
 # ── Retry / Resilience ────────────────────────────────────
 API_MAX_RETRIES = 3                  # Max retry attempts
 API_RETRY_BASE_DELAY = 2            # Base delay in seconds (exponential)
+API_DELAY_BETWEEN_COINS = 0.3       # Delay (s) between coin API calls to avoid rate limit
 
 # ── Scanner ────────────────────────────────────────────────
 SCAN_INTERVAL_SECONDS = 60           # Scan every 60 seconds
 TOP_COINS_TO_SCAN = 50               # Scan top 50 coins by volume
+MAX_LEVELS_PER_COIN = 10             # Evaluate top N levels per coin (was 5)
 DASHBOARD_INTERVAL_HOURS = 4         # Send dashboard every N hours

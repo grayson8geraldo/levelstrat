@@ -29,6 +29,7 @@ import logging
 from src.config import (
     SCAN_INTERVAL_SECONDS, TF_CONTEXT, TF_DIRECTION,
     TF_WORKING, TF_ENTRY, CANDLE_LIMIT,
+    MAX_LEVELS_PER_COIN, API_DELAY_BETWEEN_COINS,
 )
 from src.data_fetcher import DataFetcher
 from src.screener import CoinScreener
@@ -92,7 +93,7 @@ class DLSScanner:
 
         signals_found = 0
 
-        for cand in candidates:
+        for i, cand in enumerate(candidates):
             symbol = cand["symbol"]
             try:
                 found = self._process_candidate(cand, df_btc)
@@ -101,6 +102,10 @@ class DLSScanner:
             except Exception as e:
                 logger.error(f"Error processing {symbol}: {e}")
                 continue
+
+            # Rate limit protection: small delay between coins
+            if API_DELAY_BETWEEN_COINS > 0 and i < len(candidates) - 1:
+                time.sleep(API_DELAY_BETWEEN_COINS)
 
         logger.info(f"Scan cycle #{self._scan_count} complete. Signals: {signals_found}")
 
@@ -166,7 +171,7 @@ class DLSScanner:
         logger.info(f"  {symbol}: found {len(levels)} diagonal levels")
 
         # Evaluate signals for each level
-        for level in levels[:5]:
+        for level in levels[:MAX_LEVELS_PER_COIN]:
             signal = evaluate_signal(
                 symbol=symbol,
                 scenario=scenario,

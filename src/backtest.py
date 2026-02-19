@@ -256,7 +256,7 @@ class BacktestEngine:
             elif window_trend == "bearish":
                 scenario = "downtrend"
             else:
-                scenario = "uptrend"  # Default
+                scenario = "ranging"
 
             # Detect diagonal levels
             levels = detect_diagonal_levels(df_window_ind, timeframe)
@@ -269,7 +269,7 @@ class BacktestEngine:
             # Entry TF approximation (last 50 candles of window)
             df_entry_approx = window.iloc[-50:] if len(window) >= 50 else window
 
-            for level in levels[:3]:
+            for level in levels[:5]:
                 signal = evaluate_signal(
                     symbol=symbol,
                     scenario=scenario,

@@ -23,6 +23,7 @@ DIRECTION_EMOJI = {"LONG": "\U0001f7e2", "SHORT": "\U0001f534"}
 SCENARIO_LABELS = {
     "uptrend": "\u2191 \u0412\u043e\u0441\u0445\u043e\u0434\u044f\u0449\u0438\u0439 \u0442\u0440\u0435\u043d\u0434",
     "downtrend": "\u2193 \u041d\u0438\u0441\u0445\u043e\u0434\u044f\u0449\u0438\u0439 \u0442\u0440\u0435\u043d\u0434",
+    "ranging": "\u2194\ufe0f \u0424\u043b\u044d\u0442 (\u043e\u0442 \u0443\u0440\u043e\u0432\u043d\u0435\u0439)",
     "pump": "\u26a1 \u041f\u0430\u043c\u043f (\u0441\u0434\u0443\u0442\u0438\u0435)",
     "new_listing": "\u2728 \u041d\u043e\u0432\u044b\u0439 \u043b\u0438\u0441\u0442\u0438\u043d\u0433",
 }
@@ -157,8 +158,30 @@ class TelegramNotifier:
 
     def send_signal_sync(self, signal: Signal):
         """Synchronous wrapper for send_signal."""
-        asyncio.run(self.send_signal(signal))
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self.send_signal(signal))
+        except Exception as e:
+            logger.error(f"send_signal_sync error: {e}")
 
     def send_status_sync(self, text: str):
         """Synchronous wrapper for send_status."""
-        asyncio.run(self.send_status(text))
+        try:
+            loop = asyncio.get_event_loop()
+            if loop.is_closed():
+                loop = asyncio.new_event_loop()
+                asyncio.set_event_loop(loop)
+        except RuntimeError:
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+        try:
+            loop.run_until_complete(self.send_status(text))
+        except Exception as e:
+            logger.error(f"send_status_sync error: {e}")

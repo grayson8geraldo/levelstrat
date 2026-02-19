@@ -150,10 +150,44 @@ def evaluate_signal(
     confirmations = {}
 
     # ── CONFIRMATION 1: Diagonal Level Touch (mandatory) ─────
-    near_level = is_price_near_level(current_price, level, candle_idx, timeframe)
+    # Check last 3 candles for proximity to level (not just the last one)
+    near_level = False
+    best_candle_idx = candle_idx
+    for lookback in range(3):
+        idx = candle_idx - lookback
+        if idx < 0:
+            break
+        check_price = float(df_working.iloc[idx]["close"])
+        if is_price_near_level(check_price, level, idx, timeframe):
+            near_level = True
+            best_candle_idx = idx
+            break
+        # Also check high/low wicks
+        check_high = float(df_working.iloc[idx]["high"])
+        check_low = float(df_working.iloc[idx]["low"])
+        if level.level_type == "support":
+            if is_price_near_level(check_low, level, idx, timeframe):
+                near_level = True
+                best_candle_idx = idx
+                break
+        else:
+            if is_price_near_level(check_high, level, idx, timeframe):
+                near_level = True
+                best_candle_idx = idx
+                break
+
     confirmations["diagonal_level"] = near_level
 
     if not near_level:
+        # Diagnostic logging: show distance to level
+        level_price = level.price_at(candle_idx)
+        if level_price > 0:
+            distance_pct = abs(current_price - level_price) / level_price * 100
+            if distance_pct < 2.0:  # Only log if relatively close
+                logger.debug(
+                    f"    {symbol}: {level.level_type} уровень — цена {current_price:.4f}, "
+                    f"уровень {level_price:.4f}, расстояние {distance_pct:.2f}%"
+                )
         return None
 
     # ── CONFIRMATION 2: Candle Pattern ───────────────────────
@@ -163,7 +197,14 @@ def evaluate_signal(
     confirmations["candle_pattern"] = best_pattern is not None
 
     # ── CONFIRMATION 3: Volume ───────────────────────────────
-    vol_ratio = float(last_w.get("volume_ratio", 0))
+    # Check last 3 candles for volume surge (not just the last one)
+    vol_ratio = 0.0
+    for lookback in range(3):
+        idx = candle_idx - lookback
+        if idx < 0:
+            break
+        vr = float(df_working.iloc[idx].get("volume_ratio", 0))
+        vol_ratio = max(vol_ratio, vr)
     confirmations["volume"] = vol_ratio >= VOLUME_SURGE_MULT
 
     # ── CONFIRMATION 4: Indicator (RSI + MACD + Divergence) ──
@@ -175,12 +216,12 @@ def evaluate_signal(
 
     indicator_ok = False
     if direction == "LONG":
-        indicator_ok = (rsi < 45 or macd_hist > 0)
+        indicator_ok = (rsi < 50 or macd_hist > 0)
         div = detect_rsi_divergence(df_working)
         if div == "bullish":
             indicator_ok = True
     else:
-        indicator_ok = (rsi > 55 or macd_hist < 0)
+        indicator_ok = (rsi > 50 or macd_hist < 0)
         div = detect_rsi_divergence(df_working)
         if div == "bearish":
             indicator_ok = True
@@ -188,12 +229,22 @@ def evaluate_signal(
     confirmations["indicator"] = indicator_ok
 
     # ── CONFIRMATION 5: Confluence (enhanced) ────────────────
-    level_price = level.price_at(candle_idx)
+    level_price = level.price_at(best_candle_idx)
     confluence = analyze_confluence(level_price, df_working, df_working)
-    confirmations["confluence"] = confluence.score >= 20  # At least one factor
+    confirmations["confluence"] = confluence.score >= 15  # Lowered from 20
 
     # ── Count confirmations ──────────────────────────────────
     num_conf = sum(1 for v in confirmations.values() if v)
+
+    # Diagnostic logging: always log when price is near level
+    conf_str = " | ".join(
+        f"{k}={'OK' if v else 'FAIL'}" for k, v in confirmations.items()
+    )
+    logger.info(
+        f"    {symbol}: ОКОЛО УРОВНЯ ({level.level_type}) — "
+        f"конф. {num_conf}/{MIN_CONFIRMATIONS} нужно [{conf_str}]"
+    )
+
     if num_conf < MIN_CONFIRMATIONS:
         return None
 

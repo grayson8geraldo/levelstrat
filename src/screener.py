@@ -131,5 +131,25 @@ class CoinScreener:
             candidate["trend_strength"] = strength
             return candidate
 
+        # ── Ranging / weak trend — still tradeable on levels ──
+        # Coins without strong EMA alignment can still have valid diagonal levels
+        ema_spread = abs(ema_f - ema_s) / ema_s
+        if ema_spread < 0.02:  # EMAs within 2% = ranging
+            candidate["scenario"] = "ranging"
+            candidate["trend_strength"] = ema_spread
+            return candidate
+
+        # ── Weak downtrend (EMAs not fully aligned but bearish bias) ──
+        if ema_f < ema_s:
+            candidate["scenario"] = "downtrend"
+            candidate["trend_strength"] = (ema_s - ema_f) / ema_s
+            return candidate
+
+        # ── Weak uptrend ──
+        if ema_f > ema_s:
+            candidate["scenario"] = "uptrend"
+            candidate["trend_strength"] = (ema_f - ema_s) / ema_s
+            return candidate
+
         candidate["scenario"] = None
         return candidate
