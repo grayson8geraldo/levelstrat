@@ -82,14 +82,19 @@ class DLSScanner:
         # Step 0: Check risk limits
         risk_state = self.risk_tracker.check_can_trade()
         if not risk_state.can_trade:
-            logger.warning(f"Trading blocked: {risk_state.reason}")
-            now = time.time()
-            if now - self._last_blocked_notify >= 3600:  # Remind once per hour
-                self.notifier.send_status_sync(
-                    f"\U0001f6d1 <b>Торговля заблокирована</b>\n{risk_state.reason}"
-                )
-                self._last_blocked_notify = now
-            return
+            # For loss limits / cooldown — block entirely
+            # For max positions — continue scanning (updates for existing positions still allowed)
+            is_max_positions = "Макс. позиций" in risk_state.reason
+            if not is_max_positions:
+                logger.warning(f"Trading blocked: {risk_state.reason}")
+                now = time.time()
+                if now - self._last_blocked_notify >= 3600:
+                    self.notifier.send_status_sync(
+                        f"\U0001f6d1 <b>Торговля заблокирована</b>\n{risk_state.reason}"
+                    )
+                    self._last_blocked_notify = now
+                return
+            logger.info(f"Max positions reached — scanning for updates only")
 
         # Step 1: Screen coins
         candidates = self.screener.get_candidates()
@@ -124,8 +129,15 @@ class DLSScanner:
         available_slots = max(0, MAX_OPEN_POSITIONS - open_count)
 
         signals_sent = 0
+        updates_sent = 0
         for signal in all_signals:
-            if signals_sent >= available_slots:
+            # Check if this is an update to an existing open position
+            is_update = self.risk_tracker.has_open_position(
+                signal.symbol, signal.direction
+            )
+
+            # New positions need available slots; updates don't
+            if not is_update and signals_sent >= available_slots:
                 break
 
             # Dedup check
@@ -134,22 +146,26 @@ class DLSScanner:
                 continue
 
             # Send the signal (may be skipped if price moved too far)
-            if self._send_signal(signal):
+            if self._send_signal(signal, is_update=is_update):
                 self._sent_signals.add(key)
-                signals_sent += 1
+                if is_update:
+                    updates_sent += 1
+                else:
+                    signals_sent += 1
 
         # Log results
         if all_signals:
             logger.info(
                 f"Scan cycle #{self._scan_count}: "
                 f"found {len(all_signals)} signals, "
-                f"sent top {signals_sent} (slots: {available_slots})"
+                f"sent {signals_sent} new + {updates_sent} updates "
+                f"(slots: {available_slots})"
             )
-            # Log skipped signals for transparency
             for i, s in enumerate(all_signals):
-                status = "SENT" if i < signals_sent else "skipped"
+                is_upd = self.risk_tracker.has_open_position(s.symbol, s.direction)
+                tag = "UPDATE" if is_upd else "NEW"
                 logger.info(
-                    f"  #{i+1} [{status}] {s.signal_grade} {s.direction} "
+                    f"  #{i+1} [{tag}] {s.signal_grade} {s.direction} "
                     f"{s.symbol} score={s.composite_score:.0f}"
                 )
         else:
@@ -248,11 +264,14 @@ class DLSScanner:
 
         return signals
 
-    def _send_signal(self, signal) -> bool:
+    def _send_signal(self, signal, is_update: bool = False) -> bool:
         """Log to journal, track in risk manager, send via Telegram.
-        Returns True if signal was actually sent."""
+        Returns True if signal was actually sent.
+
+        If is_update=True, this is an update to an existing open position —
+        skip journal/risk recording, just send the notification.
+        """
         # Freshness check: re-fetch live price, skip if moved too far
-        # Entry already = market price at signal generation, but time has passed
         try:
             ticker = self.fetcher.exchange.fetch_ticker(signal.symbol)
             live_price = ticker.get("last", 0)
@@ -268,6 +287,16 @@ class DLSScanner:
                 signal.entry_price = round(live_price, 6)
         except Exception as e:
             logger.debug(f"  {signal.symbol}: не удалось проверить цену: {e}")
+
+        if is_update:
+            # Update to existing position — just notify, no new records
+            logger.info(
+                f"  >>> UPDATE [{signal.signal_grade}]: {signal.direction} {signal.symbol} "
+                f"@ {signal.entry_price} | {signal.num_confirmations}/5 conf "
+                f"| score {signal.composite_score:.0f}"
+            )
+            self.notifier.send_signal_sync(signal, is_update=True)
+            return True
 
         funding_rate = getattr(signal, '_funding_rate', None)
 

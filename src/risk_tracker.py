@@ -116,6 +116,13 @@ class RiskTracker:
         """Count currently open positions."""
         return sum(1 for t in self._trades if t.outcome == "open")
 
+    def has_open_position(self, symbol: str, direction: str) -> bool:
+        """Check if there's already an open position for this symbol+direction."""
+        return any(
+            t.symbol == symbol and t.direction == direction and t.outcome == "open"
+            for t in self._trades
+        )
+
     def get_daily_pnl(self) -> float:
         """Calculate today's realized P&L as percentage."""
         today_start = datetime.utcnow().replace(hour=0, minute=0, second=0)

@@ -267,18 +267,27 @@ class TelegramNotifier:
             ]
         ])
 
-    async def send_signal(self, signal: Signal):
-        """Send a trade signal to Telegram with close buttons."""
-        # Register signal for callback tracking
-        self._signal_counter += 1
-        sid = self._signal_counter
-        self._pending_signals[sid] = {
-            "symbol": signal.symbol,
-            "direction": signal.direction,
-        }
+    async def send_signal(self, signal: Signal, is_update: bool = False):
+        """Send a trade signal to Telegram with close buttons.
 
+        If is_update=True, this is an update to an existing position —
+        adds UPDATE label and skips close buttons (original signal has them).
+        """
         msg = format_signal(signal)
-        keyboard = self._make_close_keyboard(sid)
+
+        if is_update:
+            # Prepend update label, no close buttons
+            msg = "\U0001f504 <b>ОБНОВЛЕНИЕ СИГНАЛА</b>\n\n" + msg
+            keyboard = None
+        else:
+            # New signal — register for callbacks and add close buttons
+            self._signal_counter += 1
+            sid = self._signal_counter
+            self._pending_signals[sid] = {
+                "symbol": signal.symbol,
+                "direction": signal.direction,
+            }
+            keyboard = self._make_close_keyboard(sid)
 
         if not self.bot or not self.chat_id:
             logger.warning("Telegram not configured, printing to console only")
@@ -292,7 +301,8 @@ class TelegramNotifier:
                 parse_mode=ParseMode.HTML,
                 reply_markup=keyboard,
             )
-            logger.info(f"Signal sent: {signal.direction} {signal.symbol} [{signal.signal_grade}]")
+            tag = "Update" if is_update else "Signal"
+            logger.info(f"{tag} sent: {signal.direction} {signal.symbol} [{signal.signal_grade}]")
         except Exception as e:
             logger.error(f"Failed to send Telegram message: {e}")
             print(msg)
@@ -323,10 +333,10 @@ class TelegramNotifier:
             asyncio.set_event_loop(loop)
         return loop
 
-    def send_signal_sync(self, signal: Signal):
+    def send_signal_sync(self, signal: Signal, is_update: bool = False):
         """Synchronous wrapper for send_signal."""
         try:
-            self._get_loop().run_until_complete(self.send_signal(signal))
+            self._get_loop().run_until_complete(self.send_signal(signal, is_update=is_update))
         except Exception as e:
             logger.error(f"send_signal_sync error: {e}")
 
