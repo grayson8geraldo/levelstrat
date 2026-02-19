@@ -88,6 +88,7 @@ RISK_PER_TRADE_PCT = 0.01            # 1% risk per trade
 MAX_DAILY_LOSS_PCT = 0.03            # 3% max daily loss
 MAX_WEEKLY_LOSS_PCT = 0.05           # 5% max weekly loss
 MAX_OPEN_POSITIONS = 2
+MIN_SIGNAL_SCORE = 55                 # Minimum composite score to send (Grade B+)
 MAX_LEVERAGE = 10
 RECOMMENDED_LEVERAGE = 5
 COUNTER_TREND_SIZE_MULT = 0.50       # 50% size for counter-trend

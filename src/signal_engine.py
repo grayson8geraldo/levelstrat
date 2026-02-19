@@ -20,7 +20,7 @@ from src.config import (
     VOLUME_SURGE_MULT, EMA_FAST, EMA_MEDIUM, EMA_SLOW, EMA_GLOBAL,
     TOUCH_ZONE_PCT, RISK_PER_TRADE_PCT,
     COUNTER_TREND_SIZE_MULT, PUMP_SIZE_MULT, NEW_LISTING_SIZE_MULT,
-    RECOMMENDED_LEVERAGE, BLOCK_FULL_COUNTER_TREND,
+    RECOMMENDED_LEVERAGE, BLOCK_FULL_COUNTER_TREND, MIN_SIGNAL_SCORE,
 )
 from src.diagonal_levels import DiagonalLevel, is_price_near_level
 from src.candle_patterns import detect_patterns, get_best_pattern
@@ -339,6 +339,13 @@ def evaluate_signal(
         regime_adj=regime_adjustment,
     )
     grade = _grade_signal(composite)
+
+    # ── Minimum score filter ─────────────────────────────────
+    if composite < MIN_SIGNAL_SCORE:
+        logger.info(
+            f"  {symbol}: скор {composite:.0f} < {MIN_SIGNAL_SCORE} ({grade}) — пропущен"
+        )
+        return None
 
     # ── Build signal ─────────────────────────────────────────
     signal = Signal(
