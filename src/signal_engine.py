@@ -38,13 +38,13 @@ class Signal:
     symbol: str
     direction: str                     # "LONG" or "SHORT"
     scenario: str                      # "uptrend", "downtrend", "pump", "new_listing"
-    entry_price: float = 0.0
+    entry_price: float = 0.0            # Actual market price at signal time
     stop_loss: float = 0.0
     tp1: float = 0.0
     tp2: float = 0.0
     tp3: float = 0.0
     risk_pct: float = 0.0             # Stop distance %
-    rr_ratio: float = 0.0            # Average R:R
+    rr_ratio: float = 0.0            # Weighted avg R:R across TPs
     leverage: int = RECOMMENDED_LEVERAGE
     size_multiplier: float = 1.0      # 1.0 = full, 0.75 = pump, 0.5 = counter
     confirmations: dict = field(default_factory=dict)
@@ -59,7 +59,7 @@ class Signal:
     trend_1h: str = ""
     trend_15m: str = ""
     timestamp: str = ""
-    current_price: float = 0.0            # Market price at signal generation
+    level_price: float = 0.0             # Diagonal level price (reference)
     # Enhanced fields
     composite_score: float = 0.0      # Weighted overall score (0-100)
     confluence: ConfluenceResult = field(default_factory=ConfluenceResult)
@@ -272,22 +272,33 @@ def evaluate_signal(
 
     zone_pct = TOUCH_ZONE_PCT.get(timeframe, 0.0015)
 
+    # Entry = current market price (not level price — user enters at market)
+    # Stop = level-based (placed beyond the support/resistance)
+    # TPs = calculated from actual entry with real stop distance
+    entry_price = current_price
+
     if direction == "LONG":
-        entry_price = level_price
         stop_loss = level_price * (1 - zone_pct) - atr * STOP_ATR_MULT
         stop_dist = entry_price - stop_loss
+        if stop_dist <= 0:
+            return None
         tp1 = entry_price + stop_dist * TP1_R
         tp2 = entry_price + stop_dist * TP2_R
         tp3 = entry_price + stop_dist * TP3_R
     else:
-        entry_price = level_price
         stop_loss = level_price * (1 + zone_pct) + atr * STOP_ATR_MULT
         stop_dist = stop_loss - entry_price
+        if stop_dist <= 0:
+            return None
         tp1 = entry_price - stop_dist * TP1_R
         tp2 = entry_price - stop_dist * TP2_R
         tp3 = entry_price - stop_dist * TP3_R
 
     risk_pct = stop_dist / entry_price if entry_price > 0 else 0
+
+    # Real R:R based on weighted average TP (30% TP1 + 40% TP2 + 30% TP3)
+    weighted_tp_r = TP1_R * 0.30 + TP2_R * 0.40 + TP3_R * 0.30
+    rr_ratio = round(weighted_tp_r, 1)
 
     # ── Counter-trend check ────────────────────────────────
     trend_15m = get_trend_direction(df_working)
@@ -340,7 +351,7 @@ def evaluate_signal(
         tp2=round(tp2, 6),
         tp3=round(tp3, 6),
         risk_pct=round(risk_pct, 5),
-        rr_ratio=round(TP2_R, 1),
+        rr_ratio=rr_ratio,
         leverage=RECOMMENDED_LEVERAGE,
         size_multiplier=size_mult,
         confirmations=confirmations,
@@ -355,7 +366,7 @@ def evaluate_signal(
         trend_1h=trend_1h,
         trend_15m=trend_15m,
         timestamp=str(last_w.name) if hasattr(last_w, "name") else "",
-        current_price=round(current_price, 6),
+        level_price=round(level_price, 6),
         composite_score=composite,
         confluence=confluence,
         derivatives=deriv_ctx,

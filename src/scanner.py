@@ -251,7 +251,8 @@ class DLSScanner:
     def _send_signal(self, signal) -> bool:
         """Log to journal, track in risk manager, send via Telegram.
         Returns True if signal was actually sent."""
-        # Freshness check: re-fetch current price, skip if too far from entry
+        # Freshness check: re-fetch live price, skip if moved too far
+        # Entry already = market price at signal generation, but time has passed
         try:
             ticker = self.fetcher.exchange.fetch_ticker(signal.symbol)
             live_price = ticker.get("last", 0)
@@ -263,8 +264,8 @@ class DLSScanner:
                         f"ушла на {distance:.2%} от входа {signal.entry_price}"
                     )
                     return False
-                # Update current_price with live data
-                signal.current_price = round(live_price, 6)
+                # Update entry to latest live price for most accurate TPs
+                signal.entry_price = round(live_price, 6)
         except Exception as e:
             logger.debug(f"  {signal.symbol}: не удалось проверить цену: {e}")
 
