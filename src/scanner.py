@@ -32,7 +32,7 @@ from src.config import (
     SCAN_INTERVAL_SECONDS, TF_CONTEXT, TF_DIRECTION,
     TF_WORKING, TF_ENTRY, CANDLE_LIMIT,
     MAX_LEVELS_PER_COIN, API_DELAY_BETWEEN_COINS,
-    MAX_OPEN_POSITIONS,
+    MAX_OPEN_POSITIONS, MAX_ENTRY_DISTANCE_PCT,
 )
 from src.data_fetcher import DataFetcher
 from src.screener import CoinScreener
@@ -130,10 +130,10 @@ class DLSScanner:
             if key in self._sent_signals:
                 continue
 
-            # Send the signal
-            self._send_signal(signal)
-            self._sent_signals.add(key)
-            signals_sent += 1
+            # Send the signal (may be skipped if price moved too far)
+            if self._send_signal(signal):
+                self._sent_signals.add(key)
+                signals_sent += 1
 
         # Log results
         if all_signals:
@@ -245,8 +245,26 @@ class DLSScanner:
 
         return signals
 
-    def _send_signal(self, signal):
-        """Log to journal, track in risk manager, send via Telegram."""
+    def _send_signal(self, signal) -> bool:
+        """Log to journal, track in risk manager, send via Telegram.
+        Returns True if signal was actually sent."""
+        # Freshness check: re-fetch current price, skip if too far from entry
+        try:
+            ticker = self.fetcher.exchange.fetch_ticker(signal.symbol)
+            live_price = ticker.get("last", 0)
+            if live_price and signal.entry_price:
+                distance = abs(live_price - signal.entry_price) / signal.entry_price
+                if distance > MAX_ENTRY_DISTANCE_PCT:
+                    logger.info(
+                        f"  {signal.symbol}: пропущен — цена {live_price:.6f} "
+                        f"ушла на {distance:.2%} от входа {signal.entry_price}"
+                    )
+                    return False
+                # Update current_price with live data
+                signal.current_price = round(live_price, 6)
+        except Exception as e:
+            logger.debug(f"  {signal.symbol}: не удалось проверить цену: {e}")
+
         funding_rate = getattr(signal, '_funding_rate', None)
 
         # Log to journal
@@ -269,6 +287,7 @@ class DLSScanner:
             f"| score {signal.composite_score:.0f}"
         )
         self.notifier.send_signal_sync(signal)
+        return True
 
     def run(self):
         """Run the scanner in a continuous loop."""

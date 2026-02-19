@@ -108,6 +108,7 @@ def format_signal(signal: Signal) -> str:
         f"\U0001f4af <b>Скор:</b> [{score_bar}] {score:.0f}/100\n"
         f"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
         f"\U0001f4b0 <b>Вход:</b>    {signal.entry_price}\n"
+        f"\U0001f4b1 <b>Цена сейчас:</b> {signal.current_price}\n"
         f"\U0001f6d1 <b>Стоп:</b>     {signal.stop_loss}  ({signal.risk_pct:.2%})\n"
         f"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
         f"\U0001f3c1 <b>TP1 (30%):</b> {signal.tp1}\n"

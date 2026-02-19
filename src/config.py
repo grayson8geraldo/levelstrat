@@ -91,6 +91,8 @@ MAX_OPEN_POSITIONS = 2
 MAX_LEVERAGE = 10
 RECOMMENDED_LEVERAGE = 5
 COUNTER_TREND_SIZE_MULT = 0.50       # 50% size for counter-trend
+BLOCK_FULL_COUNTER_TREND = True      # Block when ALL TFs agree against direction
+MAX_ENTRY_DISTANCE_PCT = 0.005       # 0.5% max distance from entry to send signal
 PUMP_SIZE_MULT = 0.75                # 75% size for pump trades
 NEW_LISTING_SIZE_MULT = 0.75         # 75% size for new listings
 

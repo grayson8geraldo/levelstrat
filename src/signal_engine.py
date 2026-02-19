@@ -20,7 +20,7 @@ from src.config import (
     VOLUME_SURGE_MULT, EMA_FAST, EMA_MEDIUM, EMA_SLOW, EMA_GLOBAL,
     TOUCH_ZONE_PCT, RISK_PER_TRADE_PCT,
     COUNTER_TREND_SIZE_MULT, PUMP_SIZE_MULT, NEW_LISTING_SIZE_MULT,
-    RECOMMENDED_LEVERAGE,
+    RECOMMENDED_LEVERAGE, BLOCK_FULL_COUNTER_TREND,
 )
 from src.diagonal_levels import DiagonalLevel, is_price_near_level
 from src.candle_patterns import detect_patterns, get_best_pattern
@@ -59,6 +59,7 @@ class Signal:
     trend_1h: str = ""
     trend_15m: str = ""
     timestamp: str = ""
+    current_price: float = 0.0            # Market price at signal generation
     # Enhanced fields
     composite_score: float = 0.0      # Weighted overall score (0-100)
     confluence: ConfluenceResult = field(default_factory=ConfluenceResult)
@@ -288,12 +289,27 @@ def evaluate_signal(
 
     risk_pct = stop_dist / entry_price if entry_price > 0 else 0
 
-    # ── Size multiplier based on scenario ────────────────────
+    # ── Counter-trend check ────────────────────────────────
     trend_15m = get_trend_direction(df_working)
     is_counter_trend = (
         (direction == "LONG" and trend_1h == "bearish") or
         (direction == "SHORT" and trend_1h == "bullish")
     )
+
+    # Block signal when ALL timeframes agree against the direction
+    if BLOCK_FULL_COUNTER_TREND and is_counter_trend:
+        all_against = (
+            (direction == "LONG" and trend_4h == "bearish"
+             and trend_1h == "bearish" and trend_15m == "bearish") or
+            (direction == "SHORT" and trend_4h == "bullish"
+             and trend_1h == "bullish" and trend_15m == "bullish")
+        )
+        if all_against:
+            logger.info(
+                f"  {symbol}: блок полного контр-тренда — "
+                f"{direction} при 4H={trend_4h} 1H={trend_1h} 15m={trend_15m}"
+            )
+            return None
 
     size_mult = 1.0
     if is_counter_trend:
@@ -339,6 +355,7 @@ def evaluate_signal(
         trend_1h=trend_1h,
         trend_15m=trend_15m,
         timestamp=str(last_w.name) if hasattr(last_w, "name") else "",
+        current_price=round(current_price, 6),
         composite_score=composite,
         confluence=confluence,
         derivatives=deriv_ctx,
