@@ -130,3 +130,8 @@ SCAN_INTERVAL_SECONDS = 60           # Scan every 60 seconds
 TOP_COINS_TO_SCAN = 50               # Scan top 50 coins by volume
 MAX_LEVELS_PER_COIN = 10             # Evaluate top N levels per coin (was 5)
 DASHBOARD_INTERVAL_HOURS = 4         # Send dashboard every N hours
+
+# ── Signal Dedup ─────────────────────────────────────────
+SIGNAL_RESEND_COOLDOWN = 14400       # 4 hours before resending same signal
+SIGNAL_RESEND_MIN_IMPROVEMENT = 10   # Resend early if score improved by ≥10
+SIGNAL_DEDUP_PRICE_TOLERANCE = 0.02  # 2% — same level if within this range

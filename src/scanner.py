@@ -33,6 +33,8 @@ from src.config import (
     TF_WORKING, TF_ENTRY, CANDLE_LIMIT,
     MAX_LEVELS_PER_COIN, API_DELAY_BETWEEN_COINS,
     MAX_OPEN_POSITIONS, MAX_ENTRY_DISTANCE_PCT,
+    SIGNAL_RESEND_COOLDOWN, SIGNAL_RESEND_MIN_IMPROVEMENT,
+    SIGNAL_DEDUP_PRICE_TOLERANCE,
 )
 from src.data_fetcher import DataFetcher
 from src.screener import CoinScreener
@@ -60,7 +62,8 @@ class DLSScanner:
         self.dashboard = PerformanceDashboard(
             self.notifier, self.journal, self.risk_tracker
         )
-        self._sent_signals: set[str] = set()
+        # Dedup: symbol+direction+level_bucket → (timestamp, score)
+        self._sent_signals: dict[str, tuple[float, float]] = {}
         self._scan_count = 0
         self._last_blocked_notify = 0.0    # timestamp of last "blocked" message
 
@@ -68,10 +71,29 @@ class DLSScanner:
         self.notifier.set_risk_tracker(self.risk_tracker)
 
     def _signal_key(self, symbol: str, direction: str, level_price: float) -> str:
-        """Create a dedup key for a signal (valid for ~15 min)."""
-        ts_bucket = int(time.time() / 900)
-        price_bucket = round(level_price, 2)
-        return f"{symbol}_{direction}_{price_bucket}_{ts_bucket}"
+        """Stable dedup key: symbol + direction + rounded level price."""
+        # Round level price to reduce precision jitter
+        precision = max(2, len(str(level_price).split(".")[-1]) - 1) if "." in str(level_price) else 2
+        price_bucket = round(level_price, precision)
+        return f"{symbol}_{direction}_{price_bucket}"
+
+    def _should_resend(self, key: str, new_score: float) -> bool:
+        """Check if a signal should be (re)sent based on cooldown and score improvement."""
+        if key not in self._sent_signals:
+            return True
+        last_ts, last_score = self._sent_signals[key]
+        elapsed = time.time() - last_ts
+        # Cooldown expired — resend
+        if elapsed >= SIGNAL_RESEND_COOLDOWN:
+            return True
+        # Score improved significantly — resend early
+        if new_score - last_score >= SIGNAL_RESEND_MIN_IMPROVEMENT:
+            logger.info(
+                f"    dedup: resend (score {last_score:.0f} → {new_score:.0f}, "
+                f"+{new_score - last_score:.0f})"
+            )
+            return True
+        return False
 
     def scan_once(self):
         """Run one full scan cycle. Collects ALL signals, sends BEST."""
@@ -140,14 +162,14 @@ class DLSScanner:
             if not is_update and signals_sent >= available_slots:
                 break
 
-            # Dedup check
-            key = self._signal_key(signal.symbol, signal.direction, signal.entry_price)
-            if key in self._sent_signals:
+            # Dedup check: use level_price (stable), not entry_price (moves each candle)
+            key = self._signal_key(signal.symbol, signal.direction, signal.level_price)
+            if not self._should_resend(key, signal.composite_score):
                 continue
 
             # Send the signal (may be skipped if price moved too far)
             if self._send_signal(signal, is_update=is_update):
-                self._sent_signals.add(key)
+                self._sent_signals[key] = (time.time(), signal.composite_score)
                 if is_update:
                     updates_sent += 1
                 else:
@@ -171,9 +193,11 @@ class DLSScanner:
         else:
             logger.info(f"Scan cycle #{self._scan_count} complete. No signals found.")
 
-        # Cleanup old dedup keys
-        if len(self._sent_signals) > 1000:
-            self._sent_signals = set(list(self._sent_signals)[-500:])
+        # Cleanup expired dedup entries (older than 2x cooldown)
+        cutoff = time.time() - SIGNAL_RESEND_COOLDOWN * 2
+        self._sent_signals = {
+            k: v for k, v in self._sent_signals.items() if v[0] > cutoff
+        }
 
         # Step 5: Dashboard check
         regime_info = ""
