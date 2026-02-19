@@ -62,6 +62,7 @@ class DLSScanner:
         )
         self._sent_signals: set[str] = set()
         self._scan_count = 0
+        self._last_blocked_notify = 0.0    # timestamp of last "blocked" message
 
         # Connect notifier to risk tracker for button callbacks
         self.notifier.set_risk_tracker(self.risk_tracker)
@@ -82,10 +83,12 @@ class DLSScanner:
         risk_state = self.risk_tracker.check_can_trade()
         if not risk_state.can_trade:
             logger.warning(f"Trading blocked: {risk_state.reason}")
-            if self._scan_count % 10 == 0:  # Remind every 10 cycles
+            now = time.time()
+            if now - self._last_blocked_notify >= 3600:  # Remind once per hour
                 self.notifier.send_status_sync(
                     f"\U0001f6d1 <b>Торговля заблокирована</b>\n{risk_state.reason}"
                 )
+                self._last_blocked_notify = now
             return
 
         # Step 1: Screen coins
