@@ -137,4 +137,4 @@ SIGNAL_RESEND_MIN_IMPROVEMENT = 10   # Resend early if score improved by ≥10
 SIGNAL_DEDUP_PRICE_TOLERANCE = 0.02  # 2% — same level if within this range
 
 # ── Position Monitor ────────────────────────────────────
-POSITION_CHECK_INTERVAL = 900        # Check positions every 15 min (seconds)
+POSITION_CHECK_INTERVAL = 60         # Check positions every scan cycle (seconds)

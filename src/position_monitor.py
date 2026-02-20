@@ -2,7 +2,8 @@
 Position Monitor — automatic virtual position tracking.
 
 After a signal is sent, opens a virtual position at the level price
-and periodically checks current price against SL/TP targets.
+and checks every scan cycle (60s) using 1-minute candle high/low
+to catch price spikes that may have already retraced.
 
 Tracks:
   - TP1/TP2/TP3 progressive hits (partial closes)
@@ -30,6 +31,9 @@ logger = logging.getLogger(__name__)
 # TF_WORKING duration in seconds (15m = 900s)
 TF_SECONDS = {"1m": 60, "5m": 300, "15m": 900, "1h": 3600, "4h": 14400}
 
+# How many 1m candles to fetch per check (covers gap between checks)
+CANDLES_TO_CHECK = 5
+
 
 @dataclass
 class VirtualPosition:
@@ -38,7 +42,7 @@ class VirtualPosition:
     symbol: str
     direction: str                # LONG / SHORT
     entry_price: float            # level_price — for tracking
-    stop_loss: float              # original SL
+    stop_loss: float              # current SL (moves to BE after TP1)
     original_stop: float          # preserved for P&L calc
     tp1: float
     tp2: float
@@ -133,7 +137,11 @@ class PositionMonitor:
         return time.time() - self._last_check >= POSITION_CHECK_INTERVAL
 
     def check_all(self):
-        """Check all open positions against current prices."""
+        """Check all open positions using 1m candle high/low.
+
+        Uses candle extremes (high for LONG TPs, low for SHORT TPs)
+        to catch price spikes that may have already retraced by now.
+        """
         open_positions = [p for p in self._positions if p.status == "open"]
         if not open_positions:
             return
@@ -142,64 +150,80 @@ class PositionMonitor:
         logger.info(f"Position monitor: checking {len(open_positions)} open positions...")
 
         for pos in open_positions:
+            if pos.status != "open":
+                continue
             try:
-                ticker = self.fetcher.exchange.fetch_ticker(pos.symbol)
-                price = ticker.get("last", 0)
-                if not price:
+                # Fetch recent 1m candles to catch intra-candle spikes
+                df = self.fetcher.fetch_ohlcv(pos.symbol, "1m", limit=CANDLES_TO_CHECK)
+                if df is None or df.empty:
+                    logger.warning(f"Position check: no 1m data for {pos.symbol}")
                     continue
-                self._check_position(pos, float(price))
+
+                # Check each candle chronologically
+                for _, candle in df.iterrows():
+                    if pos.status != "open":
+                        break
+                    high = float(candle["high"])
+                    low = float(candle["low"])
+                    close = float(candle["close"])
+                    self._check_position(pos, high, low, close)
+
             except Exception as e:
                 logger.error(f"Position check error {pos.symbol}: {e}")
 
-    def _price_reached(self, pos: VirtualPosition, price: float, target: float) -> bool:
-        """Check if price reached target level (direction-aware)."""
-        if pos.direction == "LONG":
-            return price >= target
-        return price <= target
+    def _check_position(self, pos: VirtualPosition, high: float, low: float, close: float):
+        """Check a single position against candle high/low/close.
 
-    def _check_position(self, pos: VirtualPosition, price: float):
-        """Check a single position against current price.
+        For LONG:  TP checks use high (best price), SL checks use low (worst price)
+        For SHORT: TP checks use low (best price), SL checks use high (worst price)
 
         TP checks go from highest to lowest (TP3→TP2→TP1).
-        If price skipped past multiple TPs in one check cycle,
-        all intermediate TPs are marked and the highest reached one
-        determines the outcome.
         """
+        is_long = pos.direction == "LONG"
+        # Best price for TPs (high for long, low for short)
+        tp_price = high if is_long else low
+        # Worst price for SL (low for long, high for short)
+        sl_price = low if is_long else high
+
         # ── Stop loss check ──────────────────────────────────
-        sl_hit = (pos.direction == "LONG" and price <= pos.stop_loss) or \
-                 (pos.direction == "SHORT" and price >= pos.stop_loss)
+        sl_hit = (is_long and sl_price <= pos.stop_loss) or \
+                 (not is_long and sl_price >= pos.stop_loss)
         if sl_hit:
             if pos.tp1_hit:
-                # TP1 was hit, SL is at breakeven → partial win
-                self._close_position(pos, price, "win", self._calc_partial_pnl(pos))
+                # TP1 was hit, SL moved to breakeven → partial win
+                self._close_position(pos, pos.stop_loss, "win", self._calc_partial_pnl(pos))
             else:
-                # Full stop loss
-                self._close_position(pos, price, "loss", -1.0)
+                self._close_position(pos, pos.stop_loss, "loss", -1.0)
             return
 
-        # ── TP checks: highest first ────────────────────────
-        # TP3 → full win, close immediately
-        if not pos.tp3_hit and self._price_reached(pos, price, pos.tp3):
+        # ── TP3 → full win, close immediately ────────────────
+        tp3_hit = (is_long and tp_price >= pos.tp3) or \
+                  (not is_long and tp_price <= pos.tp3)
+        if not pos.tp3_hit and tp3_hit:
             pos.tp1_hit = True
             pos.tp2_hit = True
             pos.tp3_hit = True
             full_r = TP1_PCT * TP1_R + TP2_PCT * TP2_R + TP3_PCT * TP3_R
-            self._close_position(pos, price, "win", full_r)
+            self._close_position(pos, pos.tp3, "win", full_r)
             return
 
-        # TP2 reached → mark TP1+TP2, move SL to breakeven, keep tracking for TP3
-        if not pos.tp2_hit and self._price_reached(pos, price, pos.tp2):
+        # ── TP2 reached → mark TP1+TP2, move SL to BE ───────
+        tp2_hit = (is_long and tp_price >= pos.tp2) or \
+                  (not is_long and tp_price <= pos.tp2)
+        if not pos.tp2_hit and tp2_hit:
             pos.tp1_hit = True
             pos.tp2_hit = True
             pos.stop_loss = pos.entry_price
-            self._notify_tp_hit(pos, 2, price)
-            # Don't return — still check time stop below
+            self._notify_tp_hit(pos, 2, pos.tp2)
 
-        # TP1 reached → mark TP1, move SL to breakeven, keep tracking
-        elif not pos.tp1_hit and self._price_reached(pos, price, pos.tp1):
-            pos.tp1_hit = True
-            pos.stop_loss = pos.entry_price
-            self._notify_tp_hit(pos, 1, price)
+        # ── TP1 reached → mark TP1, move SL to BE ───────────
+        elif not pos.tp1_hit:
+            tp1_hit = (is_long and tp_price >= pos.tp1) or \
+                      (not is_long and tp_price <= pos.tp1)
+            if tp1_hit:
+                pos.tp1_hit = True
+                pos.stop_loss = pos.entry_price
+                self._notify_tp_hit(pos, 1, pos.tp1)
 
         # ── Time stop ───────────────────────────────────────
         tf_sec = TF_SECONDS.get(pos.timeframe, 900)
@@ -211,10 +235,9 @@ class PositionMonitor:
                 pnl_r = self._calc_partial_pnl(pos)
                 outcome = "win" if pnl_r > 0 else "breakeven"
             else:
-                # No TPs hit, close at market
-                pnl_r = self._calc_market_pnl(pos, price)
+                pnl_r = self._calc_market_pnl(pos, close)
                 outcome = "win" if pnl_r > 0.1 else ("loss" if pnl_r < -0.1 else "breakeven")
-            self._close_position(pos, price, outcome, pnl_r, is_time_stop=True)
+            self._close_position(pos, close, outcome, pnl_r, is_time_stop=True)
 
     def _calc_partial_pnl(self, pos: VirtualPosition) -> float:
         """Calculate P&L in R for partial TP hits (remaining at breakeven)."""
