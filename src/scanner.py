@@ -71,8 +71,9 @@ class DLSScanner:
         self._scan_count = 0
         self._last_blocked_notify = 0.0    # timestamp of last "blocked" message
 
-        # Connect notifier to risk tracker for button callbacks
+        # Connect notifier to risk tracker + position monitor for button callbacks
         self.notifier.set_risk_tracker(self.risk_tracker)
+        self.notifier.set_position_monitor(self.monitor)
 
     def _signal_key(self, symbol: str, direction: str, level_price: float) -> str:
         """Stable dedup key: symbol + direction + rounded level price."""

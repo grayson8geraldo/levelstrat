@@ -140,11 +140,16 @@ class TelegramNotifier:
         self._signal_counter = 0
         self._pending_signals = {}   # signal_id -> {"symbol", "direction"}
         self._risk_tracker = None    # Set by scanner
+        self._position_monitor = None  # Set by scanner
         self._listener_running = False
 
     def set_risk_tracker(self, risk_tracker):
         """Set the risk tracker for callback updates."""
         self._risk_tracker = risk_tracker
+
+    def set_position_monitor(self, position_monitor):
+        """Set the position monitor for callback updates."""
+        self._position_monitor = position_monitor
 
     # ── Callback listener (background thread) ────────────────
 
@@ -214,15 +219,18 @@ class TelegramNotifier:
         outcome = outcome_map.get(outcome_key)
         label = OUTCOME_LABELS.get(outcome_key, outcome_key)
 
-        # Update risk tracker
+        # Update risk tracker + position monitor
         info = self._pending_signals.pop(signal_id, None)
-        if info and self._risk_tracker and outcome:
-            self._risk_tracker.record_outcome(
-                info["symbol"], info["direction"], outcome
-            )
-            logger.info(
-                f"Позиция закрыта: {info['symbol']} {info['direction']} -> {label}"
-            )
+        if info and outcome:
+            symbol, direction = info["symbol"], info["direction"]
+
+            if self._risk_tracker:
+                self._risk_tracker.record_outcome(symbol, direction, outcome)
+
+            if self._position_monitor:
+                self._position_monitor.close_position_manual(symbol, direction, outcome)
+
+            logger.info(f"Позиция закрыта: {symbol} {direction} -> {label}")
 
         # Answer callback (removes loading spinner on button)
         self._tg_api("answerCallbackQuery", {

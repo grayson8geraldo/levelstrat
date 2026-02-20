@@ -69,6 +69,41 @@ class PositionMonitor:
         self._positions: list[VirtualPosition] = []
         self._last_check = 0.0
 
+    def close_position_manual(self, symbol: str, direction: str, outcome: str):
+        """Close a virtual position manually (from Telegram button callback).
+
+        This ensures the monitor stops tracking a position that the user
+        already closed via inline buttons.
+        """
+        for pos in self._positions:
+            if pos.symbol == symbol and pos.direction == direction and pos.status == "open":
+                pos.status = "closed"
+                pos.outcome = outcome
+                pos.closed_at = time.time()
+                # Calculate approximate P&L based on TP progress
+                if outcome == "win":
+                    pos.pnl_r = self._calc_partial_pnl(pos) if pos.tp1_hit else 1.0
+                elif outcome == "loss":
+                    pos.pnl_r = -1.0
+                else:
+                    pos.pnl_r = 0.0
+                pos.pnl_pct = round(pos.pnl_r * RISK_PER_TRADE_PCT * pos.size_multiplier, 5)
+
+                # Update journal
+                self.journal.update_outcome(
+                    signal_id=pos.journal_id,
+                    outcome=outcome,
+                    exit_price=0.0,
+                    pnl_pct=pos.pnl_pct,
+                    pnl_r=pos.pnl_r,
+                )
+                logger.info(
+                    f"Position closed manually: {pos.direction} {pos.symbol} "
+                    f"outcome={outcome} pnl={pos.pnl_r:+.2f}R"
+                )
+                return True
+        return False
+
     def open_position(self, signal, journal_id: int):
         """Open a virtual position after signal is sent."""
         pos = VirtualPosition(
@@ -116,13 +151,23 @@ class PositionMonitor:
             except Exception as e:
                 logger.error(f"Position check error {pos.symbol}: {e}")
 
-    def _check_position(self, pos: VirtualPosition, price: float):
-        """Check a single position against current price."""
-        is_long = pos.direction == "LONG"
+    def _price_reached(self, pos: VirtualPosition, price: float, target: float) -> bool:
+        """Check if price reached target level (direction-aware)."""
+        if pos.direction == "LONG":
+            return price >= target
+        return price <= target
 
+    def _check_position(self, pos: VirtualPosition, price: float):
+        """Check a single position against current price.
+
+        TP checks go from highest to lowest (TP3→TP2→TP1).
+        If price skipped past multiple TPs in one check cycle,
+        all intermediate TPs are marked and the highest reached one
+        determines the outcome.
+        """
         # ── Stop loss check ──────────────────────────────────
-        sl_hit = (is_long and price <= pos.stop_loss) or \
-                 (not is_long and price >= pos.stop_loss)
+        sl_hit = (pos.direction == "LONG" and price <= pos.stop_loss) or \
+                 (pos.direction == "SHORT" and price >= pos.stop_loss)
         if sl_hit:
             if pos.tp1_hit:
                 # TP1 was hit, SL is at breakeven → partial win
@@ -132,34 +177,27 @@ class PositionMonitor:
                 self._close_position(pos, price, "loss", -1.0)
             return
 
-        # ── TP3 check (full target) ─────────────────────────
-        tp3_hit = (is_long and price >= pos.tp3) or \
-                  (not is_long and price <= pos.tp3)
-        if tp3_hit and not pos.tp3_hit:
+        # ── TP checks: highest first ────────────────────────
+        # TP3 → full win, close immediately
+        if not pos.tp3_hit and self._price_reached(pos, price, pos.tp3):
             pos.tp1_hit = True
             pos.tp2_hit = True
             pos.tp3_hit = True
-            # Full win: weighted R = 0.30*1R + 0.40*2R + 0.30*3R = 2.0R
             full_r = TP1_PCT * TP1_R + TP2_PCT * TP2_R + TP3_PCT * TP3_R
             self._close_position(pos, price, "win", full_r)
             return
 
-        # ── TP2 check ───────────────────────────────────────
-        tp2_hit = (is_long and price >= pos.tp2) or \
-                  (not is_long and price <= pos.tp2)
-        if tp2_hit and not pos.tp2_hit:
+        # TP2 reached → mark TP1+TP2, move SL to breakeven, keep tracking for TP3
+        if not pos.tp2_hit and self._price_reached(pos, price, pos.tp2):
             pos.tp1_hit = True
             pos.tp2_hit = True
-            # Move stop to breakeven (already moved at TP1, but ensure)
             pos.stop_loss = pos.entry_price
             self._notify_tp_hit(pos, 2, price)
+            # Don't return — still check time stop below
 
-        # ── TP1 check ───────────────────────────────────────
-        tp1_hit = (is_long and price >= pos.tp1) or \
-                  (not is_long and price <= pos.tp1)
-        if tp1_hit and not pos.tp1_hit:
+        # TP1 reached → mark TP1, move SL to breakeven, keep tracking
+        elif not pos.tp1_hit and self._price_reached(pos, price, pos.tp1):
             pos.tp1_hit = True
-            # Move stop to breakeven
             pos.stop_loss = pos.entry_price
             self._notify_tp_hit(pos, 1, price)
 
