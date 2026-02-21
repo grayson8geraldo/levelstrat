@@ -109,12 +109,17 @@ class PositionMonitor:
         return False
 
     def open_position(self, signal, journal_id: int):
-        """Open a virtual position after signal is sent."""
+        """Open a virtual position after signal is sent.
+
+        Uses entry_price (market price at signal time), NOT level_price,
+        because TP1/TP2/TP3 and SL are calculated from entry_price.
+        Using level_price would create false TP hits when level != entry.
+        """
         pos = VirtualPosition(
             journal_id=journal_id,
             symbol=signal.symbol,
             direction=signal.direction,
-            entry_price=signal.level_price,
+            entry_price=signal.entry_price,
             stop_loss=signal.stop_loss,
             original_stop=signal.stop_loss,
             tp1=signal.tp1,

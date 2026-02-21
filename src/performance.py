@@ -11,7 +11,7 @@ Reports:
 
 import time
 import logging
-from datetime import datetime
+from datetime import datetime, timedelta
 
 logger = logging.getLogger(__name__)
 
@@ -192,8 +192,13 @@ class PerformanceDashboard:
             self.notifier.send_status_sync(msg)
 
     def _send_daily(self, regime_info: str = ""):
-        """Send daily dashboard."""
-        journal_stats = self.journal.get_daily_stats()
+        """Send daily dashboard.
+
+        Sent at midnight UTC — shows YESTERDAY's stats (the day that just ended),
+        not the new day which has 0 signals yet.
+        """
+        yesterday = (datetime.utcnow() - timedelta(days=1)).strftime("%Y-%m-%d")
+        journal_stats = self.journal.get_daily_stats(yesterday)
         risk_stats = self.risk_tracker.get_stats_summary()
 
         msg = format_daily_dashboard(journal_stats, risk_stats, regime_info)
