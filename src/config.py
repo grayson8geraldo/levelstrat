@@ -132,6 +132,13 @@ API_MAX_RETRIES = 3                  # Max retry attempts
 API_RETRY_BASE_DELAY = 2            # Base delay in seconds (exponential)
 API_DELAY_BETWEEN_COINS = 0.3       # Delay (s) between coin API calls to avoid rate limit
 
+# ── Volume Acceleration ──────────────────────────────────
+VOLUME_ACCEL_MIN_READINGS = 3        # Min readings before acceleration kicks in
+VOLUME_ACCEL_LOOKBACK = 5            # Compare current vs N cycles ago
+VOLUME_ACCEL_MAX_HISTORY = 15        # Max cached readings per coin
+VOLUME_ACCEL_WEIGHT = 0.3            # How much acceleration affects sorting (0=none, 1=full)
+VOLUME_ACCEL_MIN_24H = 10_000_000    # $10M — lower bar to catch coins heating up early
+
 # ── Scanner ────────────────────────────────────────────────
 SCAN_INTERVAL_SECONDS = 60           # Scan every 60 seconds
 TOP_COINS_TO_SCAN = 50               # Scan top 50 coins by volume
