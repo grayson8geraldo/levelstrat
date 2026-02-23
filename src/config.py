@@ -82,6 +82,7 @@ TP2_PCT = 0.40                        # Close 40% at TP2
 TP3_PCT = 0.30                        # Close 30% at TP3
 STOP_ATR_MULT = 0.5                   # Stop = level ± 0.5 * ATR
 TIME_STOP_CANDLES = 20                # Close after 20 candles if no move
+BE_OFFSET_R = 0.2                     # After TP1, move stop to entry + 0.2R (not exact entry)
 
 # ── Risk Management ────────────────────────────────────────
 RISK_PER_TRADE_PCT = 0.01            # 1% risk per trade
@@ -96,6 +97,12 @@ BLOCK_FULL_COUNTER_TREND = True      # Block when ALL TFs agree against directio
 MAX_ENTRY_DISTANCE_PCT = 0.005       # 0.5% max distance from entry to send signal
 PUMP_SIZE_MULT = 0.75                # 75% size for pump trades
 NEW_LISTING_SIZE_MULT = 0.75         # 75% size for new listings
+
+# ── Momentum Freshness ───────────────────────────────
+MOMENTUM_RSI_EXHAUSTION_LONG = 65    # RSI above this for LONG = rally may be exhausted
+MOMENTUM_RSI_EXHAUSTION_SHORT = 35   # RSI below this for SHORT = sell-off may be exhausted
+MOMENTUM_RSI_PENALTY = 8             # Composite score penalty for RSI exhaustion
+MOMENTUM_VOLUME_FADE_PENALTY = 4     # Penalty when volume surge was historical, not current
 
 # ── Pump Detection ─────────────────────────────────────────
 PUMP_MIN_MOVE_PCT = 0.10             # 10% minimum move

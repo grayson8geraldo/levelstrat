@@ -21,6 +21,8 @@ from src.config import (
     TOUCH_ZONE_PCT, RISK_PER_TRADE_PCT,
     COUNTER_TREND_SIZE_MULT, PUMP_SIZE_MULT, NEW_LISTING_SIZE_MULT,
     RECOMMENDED_LEVERAGE, BLOCK_FULL_COUNTER_TREND, MIN_SIGNAL_SCORE,
+    MOMENTUM_RSI_EXHAUSTION_LONG, MOMENTUM_RSI_EXHAUSTION_SHORT,
+    MOMENTUM_RSI_PENALTY, MOMENTUM_VOLUME_FADE_PENALTY,
 )
 from src.diagonal_levels import DiagonalLevel, is_price_near_level
 from src.candle_patterns import detect_patterns, get_best_pattern
@@ -330,6 +332,33 @@ def evaluate_signal(
     elif scenario == "new_listing":
         size_mult = NEW_LISTING_SIZE_MULT
 
+    # ── Momentum freshness check ──────────────────────────────
+    # Penalize signals where the move may already be exhausted
+    momentum_penalty = 0.0
+
+    # 1. RSI exhaustion: entering SHORT when already oversold (or LONG when overbought)
+    if direction == "LONG" and rsi > MOMENTUM_RSI_EXHAUSTION_LONG:
+        momentum_penalty += MOMENTUM_RSI_PENALTY
+        logger.info(
+            f"  {symbol}: RSI exhaustion (LONG при RSI={rsi:.1f} > {MOMENTUM_RSI_EXHAUSTION_LONG}) "
+            f"— штраф -{MOMENTUM_RSI_PENALTY}"
+        )
+    elif direction == "SHORT" and rsi < MOMENTUM_RSI_EXHAUSTION_SHORT:
+        momentum_penalty += MOMENTUM_RSI_PENALTY
+        logger.info(
+            f"  {symbol}: RSI exhaustion (SHORT при RSI={rsi:.1f} < {MOMENTUM_RSI_EXHAUSTION_SHORT}) "
+            f"— штраф -{MOMENTUM_RSI_PENALTY}"
+        )
+
+    # 2. Volume freshness: surge was earlier but current candle volume is below average
+    current_vol_ratio = float(df_working.iloc[-1].get("volume_ratio", 0))
+    if vol_ratio >= VOLUME_SURGE_MULT and current_vol_ratio < 1.0:
+        momentum_penalty += MOMENTUM_VOLUME_FADE_PENALTY
+        logger.info(
+            f"  {symbol}: Volume fading (всплеск={vol_ratio:.2f}x, "
+            f"текущий={current_vol_ratio:.2f}x) — штраф -{MOMENTUM_VOLUME_FADE_PENALTY}"
+        )
+
     # ── Composite score ──────────────────────────────────────
     composite = _compute_composite_score(
         num_confirmations=num_conf,
@@ -338,6 +367,8 @@ def evaluate_signal(
         derivatives_adj=deriv_ctx.score_adjustment,
         regime_adj=regime_adjustment,
     )
+    # Apply momentum penalty
+    composite = max(0, composite - momentum_penalty)
     grade = _grade_signal(composite)
 
     # ── Minimum score filter ─────────────────────────────────

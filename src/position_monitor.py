@@ -23,7 +23,7 @@ from src.config import (
     TP1_R, TP2_R, TP3_R,
     TP1_PCT, TP2_PCT, TP3_PCT,
     TIME_STOP_CANDLES, RISK_PER_TRADE_PCT,
-    POSITION_CHECK_INTERVAL,
+    POSITION_CHECK_INTERVAL, BE_OFFSET_R,
 )
 
 logger = logging.getLogger(__name__)
@@ -212,22 +212,26 @@ class PositionMonitor:
             self._close_position(pos, pos.tp3, "win", full_r)
             return
 
-        # ── TP2 reached → mark TP1+TP2, move SL to BE ───────
+        # ── TP2 reached → mark TP1+TP2, trail SL to TP1 ─────
         tp2_hit = (is_long and tp_price >= pos.tp2) or \
                   (not is_long and tp_price <= pos.tp2)
         if not pos.tp2_hit and tp2_hit:
             pos.tp1_hit = True
             pos.tp2_hit = True
-            pos.stop_loss = pos.entry_price
+            pos.stop_loss = pos.tp1  # Lock +1R on remaining 30%
             self._notify_tp_hit(pos, 2, pos.tp2)
 
-        # ── TP1 reached → mark TP1, move SL to BE ───────────
+        # ── TP1 reached → mark TP1, move SL to entry + 0.2R ─
         elif not pos.tp1_hit:
             tp1_hit = (is_long and tp_price >= pos.tp1) or \
                       (not is_long and tp_price <= pos.tp1)
             if tp1_hit:
                 pos.tp1_hit = True
-                pos.stop_loss = pos.entry_price
+                stop_dist = abs(pos.entry_price - pos.original_stop)
+                if is_long:
+                    pos.stop_loss = pos.entry_price + stop_dist * BE_OFFSET_R
+                else:
+                    pos.stop_loss = pos.entry_price - stop_dist * BE_OFFSET_R
                 self._notify_tp_hit(pos, 1, pos.tp1)
 
         # ── Time stop ───────────────────────────────────────
@@ -245,13 +249,29 @@ class PositionMonitor:
             self._close_position(pos, close, outcome, pnl_r, is_time_stop=True)
 
     def _calc_partial_pnl(self, pos: VirtualPosition) -> float:
-        """Calculate P&L in R for partial TP hits (remaining at breakeven)."""
+        """Calculate P&L in R for partial TP hits + remaining at current stop."""
         pnl_r = 0.0
         if pos.tp1_hit:
             pnl_r += TP1_PCT * TP1_R       # 30% * 1R = 0.30R
         if pos.tp2_hit:
             pnl_r += TP2_PCT * TP2_R       # 40% * 2R = 0.80R
-        # Remaining portion closes at breakeven (0R)
+
+        # Remaining portion closes at current stop (not necessarily entry)
+        remaining_pct = 1.0
+        if pos.tp1_hit:
+            remaining_pct -= TP1_PCT
+        if pos.tp2_hit:
+            remaining_pct -= TP2_PCT
+
+        if remaining_pct > 0:
+            stop_dist = abs(pos.entry_price - pos.original_stop)
+            if stop_dist > 0:
+                if pos.direction == "LONG":
+                    remaining_r = (pos.stop_loss - pos.entry_price) / stop_dist
+                else:
+                    remaining_r = (pos.entry_price - pos.stop_loss) / stop_dist
+                pnl_r += remaining_pct * remaining_r
+
         return round(pnl_r, 2)
 
     def _calc_market_pnl(self, pos: VirtualPosition, exit_price: float) -> float:
@@ -328,7 +348,9 @@ class PositionMonitor:
             f"Закрыто: {tp_pct:.0%} позиции (+{tp_r:.1f}R)\n"
         )
         if tp_num == 1:
-            msg += f"Стоп перемещён в б/у ({pos.entry_price:.6f})\n"
+            msg += f"Стоп перемещён в +{BE_OFFSET_R}R ({pos.stop_loss:.6f})\n"
+        elif tp_num == 2:
+            msg += f"Стоп перемещён в TP1 ({pos.stop_loss:.6f})\n"
         msg += f"Осталось: до TP{tp_num + 1}" if tp_num < 3 else ""
 
         self.notifier.send_status_sync(msg)
