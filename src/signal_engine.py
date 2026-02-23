@@ -23,6 +23,7 @@ from src.config import (
     RECOMMENDED_LEVERAGE, BLOCK_FULL_COUNTER_TREND, MIN_SIGNAL_SCORE,
     MOMENTUM_RSI_EXHAUSTION_LONG, MOMENTUM_RSI_EXHAUSTION_SHORT,
     MOMENTUM_RSI_PENALTY, MOMENTUM_VOLUME_FADE_PENALTY,
+    TOTAL_COST_PER_SIDE,
 )
 from src.diagonal_levels import DiagonalLevel, is_price_near_level
 from src.candle_patterns import detect_patterns, get_best_pattern
@@ -46,7 +47,9 @@ class Signal:
     tp2: float = 0.0
     tp3: float = 0.0
     risk_pct: float = 0.0             # Stop distance %
-    rr_ratio: float = 0.0            # Weighted avg R:R across TPs
+    rr_ratio: float = 0.0            # Weighted avg R:R across TPs (gross)
+    rr_net: float = 0.0              # R:R after commissions + slippage
+    commission_r: float = 0.0        # Round-trip trading cost in R
     leverage: int = RECOMMENDED_LEVERAGE
     size_multiplier: float = 1.0      # 1.0 = full, 0.75 = pump, 0.5 = counter
     confirmations: dict = field(default_factory=dict)
@@ -302,6 +305,10 @@ def evaluate_signal(
     weighted_tp_r = TP1_R * 0.30 + TP2_R * 0.40 + TP3_R * 0.30
     rr_ratio = round(weighted_tp_r, 1)
 
+    # Net R:R after commissions + slippage
+    commission_r = round(2 * TOTAL_COST_PER_SIDE / risk_pct, 2) if risk_pct > 0 else 0
+    rr_net = round(weighted_tp_r - commission_r, 1)
+
     # ── Counter-trend check ────────────────────────────────
     trend_15m = get_trend_direction(df_working)
     is_counter_trend = (
@@ -390,6 +397,8 @@ def evaluate_signal(
         tp3=round(tp3, 6),
         risk_pct=round(risk_pct, 5),
         rr_ratio=rr_ratio,
+        rr_net=rr_net,
+        commission_r=commission_r,
         leverage=RECOMMENDED_LEVERAGE,
         size_multiplier=size_mult,
         confirmations=confirmations,

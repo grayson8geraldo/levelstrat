@@ -115,7 +115,7 @@ def format_signal(signal: Signal) -> str:
         f"\U0001f3c1 <b>TP2 (40%):</b> {signal.tp2}\n"
         f"\U0001f3c1 <b>TP3 (30%):</b> {signal.tp3}\n"
         f"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
-        f"\U0001f4c8 R:R = 1:{signal.rr_ratio}\n"
+        f"\U0001f4c8 R:R = 1:{signal.rr_ratio} (нетто 1:{signal.rr_net})\n"
         f"\U0001f4aa Уровень: {signal.level_strength:.0f}/100 "
         f"(угол {signal.level_angle}\u00b0)\n"
         f"\u2696\ufe0f Плечо: {signal.leverage}x"

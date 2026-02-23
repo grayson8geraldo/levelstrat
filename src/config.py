@@ -84,6 +84,15 @@ STOP_ATR_MULT = 0.5                   # Stop = level ± 0.5 * ATR
 TIME_STOP_CANDLES = 20                # Close after 20 candles if no move
 BE_OFFSET_R = 0.2                     # After TP1, move stop to entry + 0.2R (not exact entry)
 
+# ── Trading Costs ─────────────────────────────────────────
+TRADING_FEE_PCT = 0.00055              # Taker fee per side (Bybit 0.055%)
+SLIPPAGE_PCT = 0.0003                  # Estimated slippage per side
+TOTAL_COST_PER_SIDE = TRADING_FEE_PCT + SLIPPAGE_PCT  # ~0.085% per side
+
+# ── Trailing Stop ─────────────────────────────────────────
+TRAILING_AFTER_TP1 = True              # Enable dynamic trailing after TP1
+TRAILING_STEP_R = 0.5                  # Trail stop 0.5R behind peak price
+
 # ── Risk Management ────────────────────────────────────────
 RISK_PER_TRADE_PCT = 0.01            # 1% risk per trade
 MAX_DAILY_LOSS_PCT = 0.03            # 3% max daily loss
@@ -152,3 +161,6 @@ SIGNAL_DEDUP_PRICE_TOLERANCE = 0.02  # 2% — same level if within this range
 
 # ── Position Monitor ────────────────────────────────────
 POSITION_CHECK_INTERVAL = 60         # Check positions every scan cycle (seconds)
+
+# ── OHLCV Cache ────────────────────────────────────────
+OHLCV_CACHE_TTL = 30                 # Cache candles for 30 seconds

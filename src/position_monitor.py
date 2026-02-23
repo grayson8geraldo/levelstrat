@@ -24,6 +24,7 @@ from src.config import (
     TP1_PCT, TP2_PCT, TP3_PCT,
     TIME_STOP_CANDLES, RISK_PER_TRADE_PCT,
     POSITION_CHECK_INTERVAL, BE_OFFSET_R,
+    TOTAL_COST_PER_SIDE, TRAILING_AFTER_TP1, TRAILING_STEP_R,
 )
 
 logger = logging.getLogger(__name__)
@@ -54,6 +55,7 @@ class VirtualPosition:
     tp1_hit: bool = False
     tp2_hit: bool = False
     tp3_hit: bool = False
+    peak_price: float = 0.0       # Highest high (LONG) / lowest low (SHORT) since TP1
     status: str = "open"          # open / closed
     outcome: str = ""             # win / loss / breakeven
     exit_price: float = 0.0
@@ -218,6 +220,7 @@ class PositionMonitor:
         if not pos.tp2_hit and tp2_hit:
             pos.tp1_hit = True
             pos.tp2_hit = True
+            pos.peak_price = tp_price
             pos.stop_loss = pos.tp1  # Lock +1R on remaining 30%
             self._notify_tp_hit(pos, 2, pos.tp2)
 
@@ -227,12 +230,38 @@ class PositionMonitor:
                       (not is_long and tp_price <= pos.tp1)
             if tp1_hit:
                 pos.tp1_hit = True
+                pos.peak_price = tp_price
                 stop_dist = abs(pos.entry_price - pos.original_stop)
                 if is_long:
                     pos.stop_loss = pos.entry_price + stop_dist * BE_OFFSET_R
                 else:
                     pos.stop_loss = pos.entry_price - stop_dist * BE_OFFSET_R
                 self._notify_tp_hit(pos, 1, pos.tp1)
+
+        # ── Dynamic trailing stop ──────────────────────────
+        if TRAILING_AFTER_TP1 and pos.tp1_hit and pos.status == "open":
+            stop_dist = abs(pos.entry_price - pos.original_stop)
+            if stop_dist > 0:
+                if is_long:
+                    if tp_price > pos.peak_price:
+                        pos.peak_price = tp_price
+                    new_trail = pos.peak_price - stop_dist * TRAILING_STEP_R
+                    if new_trail > pos.stop_loss:
+                        logger.debug(
+                            f"Trail {pos.symbol}: SL {pos.stop_loss:.6f} → "
+                            f"{new_trail:.6f} (peak={pos.peak_price:.6f})"
+                        )
+                        pos.stop_loss = new_trail
+                else:
+                    if pos.peak_price == 0 or tp_price < pos.peak_price:
+                        pos.peak_price = tp_price
+                    new_trail = pos.peak_price + stop_dist * TRAILING_STEP_R
+                    if new_trail < pos.stop_loss:
+                        logger.debug(
+                            f"Trail {pos.symbol}: SL {pos.stop_loss:.6f} → "
+                            f"{new_trail:.6f} (peak={pos.peak_price:.6f})"
+                        )
+                        pos.stop_loss = new_trail
 
         # ── Time stop ───────────────────────────────────────
         tf_sec = TF_SECONDS.get(pos.timeframe, 900)
@@ -287,7 +316,22 @@ class PositionMonitor:
 
     def _close_position(self, pos: VirtualPosition, exit_price: float,
                         outcome: str, pnl_r: float, is_time_stop: bool = False):
-        """Close position, update journal and risk tracker, notify."""
+        """Close position, update journal and risk tracker, notify.
+
+        Deducts round-trip trading costs (commissions + slippage) from P&L.
+        Commission in R = 2 * cost_per_side / risk_pct.
+        """
+        # Deduct trading costs from P&L
+        commission_r = 0.0
+        if pos.risk_pct > 0:
+            commission_r = round(2 * TOTAL_COST_PER_SIDE / pos.risk_pct, 3)
+        gross_pnl_r = pnl_r
+        pnl_r = round(pnl_r - commission_r, 2)
+
+        # Re-classify outcome after commissions
+        if gross_pnl_r > 0 and pnl_r <= 0:
+            outcome = "breakeven" if pnl_r >= -0.05 else "loss"
+
         pos.status = "closed"
         pos.outcome = outcome
         pos.exit_price = exit_price
@@ -314,7 +358,8 @@ class PositionMonitor:
 
         logger.info(
             f"Position closed: {pos.direction} {pos.symbol} "
-            f"outcome={outcome} pnl={pnl_r:+.2f}R ({pos.pnl_pct:+.3%}) "
+            f"outcome={outcome} pnl={gross_pnl_r:+.2f}R gross → {pnl_r:+.2f}R net "
+            f"(fee={commission_r:.2f}R) ({pos.pnl_pct:+.3%}) "
             f"reason={reason} duration={duration_str}"
         )
 
@@ -333,7 +378,7 @@ class PositionMonitor:
         )
 
         # Telegram notification
-        self._notify_close(pos, reason, duration_str)
+        self._notify_close(pos, reason, duration_str, gross_pnl_r, commission_r)
 
     def _notify_tp_hit(self, pos: VirtualPosition, tp_num: int, price: float):
         """Notify user about a TP hit (position still open)."""
@@ -356,7 +401,8 @@ class PositionMonitor:
         self.notifier.send_status_sync(msg)
         logger.info(f"TP{tp_num} hit: {pos.symbol} @ {price:.6f}")
 
-    def _notify_close(self, pos: VirtualPosition, reason: str, duration: str):
+    def _notify_close(self, pos: VirtualPosition, reason: str, duration: str,
+                      gross_pnl_r: float = 0.0, commission_r: float = 0.0):
         """Send final position close notification to Telegram."""
         if pos.outcome == "win":
             emoji = "+" if pos.pnl_r > 0 else ""
@@ -390,6 +436,12 @@ class PositionMonitor:
             f"P&L: {pos.pnl_r:+.2f}R ({pos.pnl_pct:+.3%})\n"
             f"Длительность: {duration}\n"
         )
+
+        # Show commission deduction if significant
+        if pos.risk_pct > 0:
+            fee_r = round(2 * TOTAL_COST_PER_SIDE / pos.risk_pct, 2)
+            if fee_r >= 0.05:
+                msg += f"Комиссия: -{fee_r:.2f}R (учтена в P&L)\n"
 
         self.notifier.send_status_sync(msg)
 

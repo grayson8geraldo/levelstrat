@@ -16,7 +16,7 @@ from functools import wraps
 
 from src.config import (
     BYBIT_API_KEY, BYBIT_API_SECRET, BYBIT_TESTNET, CANDLE_LIMIT,
-    API_MAX_RETRIES, API_RETRY_BASE_DELAY,
+    API_MAX_RETRIES, API_RETRY_BASE_DELAY, OHLCV_CACHE_TTL,
 )
 
 logger = logging.getLogger(__name__)
@@ -72,6 +72,7 @@ class DataFetcher:
 
         self.exchange = ccxt.bybit(opts)
         self._markets = None
+        self._ohlcv_cache: dict[tuple, tuple[float, pd.DataFrame]] = {}
 
     @retry_on_failure()
     def load_markets(self):
@@ -96,15 +97,38 @@ class DataFetcher:
                 result.append(info)
         return result
 
-    @retry_on_failure()
     def fetch_ohlcv(
         self, symbol: str, timeframe: str, limit: int = CANDLE_LIMIT
     ) -> Optional[pd.DataFrame]:
         """
-        Fetch OHLCV candles and return as DataFrame.
+        Fetch OHLCV candles with caching (TTL from config).
 
-        Columns: timestamp, open, high, low, close, volume
+        Returns a copy of cached data to prevent mutation issues
+        when callers add indicators to the DataFrame.
         """
+        cache_key = (symbol, timeframe, limit)
+        now = time.time()
+        cached = self._ohlcv_cache.get(cache_key)
+        if cached and now - cached[0] < OHLCV_CACHE_TTL:
+            return cached[1].copy()
+
+        df = self._fetch_ohlcv_api(symbol, timeframe, limit)
+        if df is not None:
+            self._ohlcv_cache[cache_key] = (now, df)
+            # Periodic cleanup: remove entries older than 5 minutes
+            if len(self._ohlcv_cache) > 500:
+                cutoff = now - 300
+                self._ohlcv_cache = {
+                    k: v for k, v in self._ohlcv_cache.items() if v[0] > cutoff
+                }
+            return df.copy()
+        return None
+
+    @retry_on_failure()
+    def _fetch_ohlcv_api(
+        self, symbol: str, timeframe: str, limit: int = CANDLE_LIMIT
+    ) -> Optional[pd.DataFrame]:
+        """Raw OHLCV fetch with retry. Used by cache layer."""
         raw = self.exchange.fetch_ohlcv(symbol, timeframe, limit=limit)
         if not raw:
             return None
