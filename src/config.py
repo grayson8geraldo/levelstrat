@@ -77,12 +77,12 @@ ENTRY_TYPES = ["aggressive", "conservative", "breakout", "retest"]
 TP1_R = 1.0                          # Take profit 1: 1R
 TP2_R = 2.0                          # Take profit 2: 2R
 TP3_R = 3.0                          # Take profit 3: 3R
-TP1_PCT = 0.30                        # Close 30% at TP1
-TP2_PCT = 0.40                        # Close 40% at TP2
-TP3_PCT = 0.30                        # Close 30% at TP3
+TP1_PCT = 0.60                        # Close 60% at TP1 (was 30% — too little profit taken early)
+TP2_PCT = 0.25                        # Close 25% at TP2
+TP3_PCT = 0.15                        # Close 15% at TP3
 STOP_ATR_MULT = 0.5                   # Stop = level ± 0.5 * ATR
 TIME_STOP_CANDLES = 20                # Close after 20 candles if no move
-BE_OFFSET_R = 0.2                     # After TP1, move stop to entry + 0.2R (not exact entry)
+BE_OFFSET_R = 0.0                     # After TP1, move stop to exact entry (BE)
 
 # ── Trading Costs ─────────────────────────────────────────
 TRADING_FEE_PCT = 0.00055              # Taker fee per side (Bybit 0.055%)
@@ -91,7 +91,7 @@ TOTAL_COST_PER_SIDE = TRADING_FEE_PCT + SLIPPAGE_PCT  # ~0.085% per side
 
 # ── Trailing Stop ─────────────────────────────────────────
 TRAILING_AFTER_TP1 = True              # Enable dynamic trailing after TP1
-TRAILING_STEP_R = 0.5                  # Trail stop 0.5R behind peak price
+TRAILING_STEP_R = 0.7                  # Trail stop 0.7R behind peak price (loose trail)
 
 # ── Risk Management ────────────────────────────────────────
 RISK_PER_TRADE_PCT = 0.01            # 1% risk per trade
@@ -135,6 +135,7 @@ FUNDING_KILL_SWITCH = 0.002          # 0.2% = no trades allowed
 VOL_EXTREME_THRESHOLD = 0.04        # 4% ATR/price = extreme volatility
 MACRO_BLACKOUT_MINUTES = 30          # No trades near macro events
 BTC_CRASH_THRESHOLD = -0.05          # -5% BTC = avoid alt trades
+BTC_TREND_PENALTY = 15               # Score penalty when signal opposes BTC 4H trend
 
 # ── Retry / Resilience ────────────────────────────────────
 API_MAX_RETRIES = 3                  # Max retry attempts

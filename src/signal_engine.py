@@ -17,13 +17,14 @@ from dataclasses import dataclass, field
 from src.config import (
     MIN_CONFIRMATIONS, RSI_PERIOD, RSI_OVERBOUGHT, RSI_OVERSOLD,
     ATR_PERIOD, STOP_ATR_MULT, TP1_R, TP2_R, TP3_R,
+    TP1_PCT, TP2_PCT, TP3_PCT,
     VOLUME_SURGE_MULT, EMA_FAST, EMA_MEDIUM, EMA_SLOW, EMA_GLOBAL,
     TOUCH_ZONE_PCT, RISK_PER_TRADE_PCT,
     COUNTER_TREND_SIZE_MULT, PUMP_SIZE_MULT, NEW_LISTING_SIZE_MULT,
     RECOMMENDED_LEVERAGE, BLOCK_FULL_COUNTER_TREND, MIN_SIGNAL_SCORE,
     MOMENTUM_RSI_EXHAUSTION_LONG, MOMENTUM_RSI_EXHAUSTION_SHORT,
     MOMENTUM_RSI_PENALTY, MOMENTUM_VOLUME_FADE_PENALTY,
-    TOTAL_COST_PER_SIDE,
+    TOTAL_COST_PER_SIDE, BTC_TREND_PENALTY,
 )
 from src.diagonal_levels import DiagonalLevel, is_price_near_level
 from src.candle_patterns import detect_patterns, get_best_pattern
@@ -63,6 +64,7 @@ class Signal:
     trend_4h: str = ""
     trend_1h: str = ""
     trend_15m: str = ""
+    btc_trend: str = ""               # BTC 4H trend direction
     timestamp: str = ""
     level_price: float = 0.0             # Diagonal level price (reference)
     # Enhanced fields
@@ -127,6 +129,7 @@ def evaluate_signal(
     funding_rate: float | None = None,
     open_interest: float | None = None,
     regime_adjustment: float = 0.0,
+    btc_trend_4h: str = "neutral",
 ) -> Signal | None:
     """
     Evaluate all confirmations for a potential signal.
@@ -301,8 +304,8 @@ def evaluate_signal(
 
     risk_pct = stop_dist / entry_price if entry_price > 0 else 0
 
-    # Real R:R based on weighted average TP (30% TP1 + 40% TP2 + 30% TP3)
-    weighted_tp_r = TP1_R * 0.30 + TP2_R * 0.40 + TP3_R * 0.30
+    # Real R:R based on weighted average TP
+    weighted_tp_r = TP1_R * TP1_PCT + TP2_R * TP2_PCT + TP3_R * TP3_PCT
     rr_ratio = round(weighted_tp_r, 1)
 
     # Net R:R after commissions + slippage
@@ -366,6 +369,22 @@ def evaluate_signal(
             f"текущий={current_vol_ratio:.2f}x) — штраф -{MOMENTUM_VOLUME_FADE_PENALTY}"
         )
 
+    # ── BTC directional filter ─────────────────────────────────
+    btc_penalty = 0.0
+    btc_counter = False
+    if btc_trend_4h == "bearish" and direction == "LONG":
+        btc_penalty = BTC_TREND_PENALTY
+        btc_counter = True
+        logger.info(
+            f"  {symbol}: BTC 4H bearish vs LONG — штраф -{BTC_TREND_PENALTY}"
+        )
+    elif btc_trend_4h == "bullish" and direction == "SHORT":
+        btc_penalty = BTC_TREND_PENALTY
+        btc_counter = True
+        logger.info(
+            f"  {symbol}: BTC 4H bullish vs SHORT — штраф -{BTC_TREND_PENALTY}"
+        )
+
     # ── Composite score ──────────────────────────────────────
     composite = _compute_composite_score(
         num_confirmations=num_conf,
@@ -374,8 +393,8 @@ def evaluate_signal(
         derivatives_adj=deriv_ctx.score_adjustment,
         regime_adj=regime_adjustment,
     )
-    # Apply momentum penalty
-    composite = max(0, composite - momentum_penalty)
+    # Apply momentum + BTC penalties
+    composite = max(0, composite - momentum_penalty - btc_penalty)
     grade = _grade_signal(composite)
 
     # ── Minimum score filter ─────────────────────────────────
@@ -412,6 +431,7 @@ def evaluate_signal(
         trend_4h=trend_4h,
         trend_1h=trend_1h,
         trend_15m=trend_15m,
+        btc_trend=btc_trend_4h,
         timestamp=str(last_w.name) if hasattr(last_w, "name") else "",
         level_price=round(level_price, 6),
         composite_score=composite,

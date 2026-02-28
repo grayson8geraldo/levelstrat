@@ -126,6 +126,7 @@ def format_signal(signal: Signal) -> str:
         f"\n"
         f"\U0001f5c2 <b>Тренды:</b> 4H={signal.trend_4h} | "
         f"1H={signal.trend_1h} | 15m={signal.trend_15m}\n"
+        f"\u20bf <b>BTC 4H:</b> {signal.btc_trend}\n"
         f"\u23f0 {signal.timestamp}"
     )
     return msg

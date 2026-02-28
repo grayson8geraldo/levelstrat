@@ -133,8 +133,16 @@ class DLSScanner:
             logger.info("No candidates found")
             return
 
-        # Step 1.5: Fetch BTC for market regime
+        # Step 1.5: Fetch BTC for market regime + trend direction
         df_btc = self.fetcher.fetch_ohlcv("BTC/USDT:USDT", TF_WORKING, limit=50)
+
+        # BTC trend on 4H — used to filter counter-BTC alt signals
+        btc_trend_4h = "neutral"
+        df_btc_4h = self.fetcher.fetch_ohlcv("BTC/USDT:USDT", TF_CONTEXT, limit=CANDLE_LIMIT)
+        if df_btc_4h is not None:
+            df_btc_4h_ind = compute_indicators(df_btc_4h)
+            if df_btc_4h_ind is not None:
+                btc_trend_4h = get_trend_direction(df_btc_4h_ind)
 
         # Step 2: Collect ALL valid signals from all candidates
         all_signals = []
@@ -142,7 +150,7 @@ class DLSScanner:
         for i, cand in enumerate(candidates):
             symbol = cand["symbol"]
             try:
-                signals = self._collect_signals(cand, df_btc)
+                signals = self._collect_signals(cand, df_btc, btc_trend_4h)
                 all_signals.extend(signals)
             except Exception as e:
                 logger.error(f"Error processing {symbol}: {e}")
@@ -215,7 +223,7 @@ class DLSScanner:
             regime_info = " | ".join(regime.reasons) if regime.reasons else ""
         self.dashboard.check_and_send(regime_info)
 
-    def _collect_signals(self, candidate: dict, df_btc=None) -> list:
+    def _collect_signals(self, candidate: dict, df_btc=None, btc_trend_4h: str = "neutral") -> list:
         """
         Process a single coin candidate.
         Returns list of valid Signal objects (not yet sent).
@@ -286,6 +294,7 @@ class DLSScanner:
                 funding_rate=funding_rate,
                 open_interest=open_interest,
                 regime_adjustment=regime.score_adjustment,
+                btc_trend_4h=btc_trend_4h,
             )
 
             if signal is None:
