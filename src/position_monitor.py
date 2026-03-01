@@ -393,7 +393,10 @@ class PositionMonitor:
             f"Закрыто: {tp_pct:.0%} позиции (+{tp_r:.1f}R)\n"
         )
         if tp_num == 1:
-            msg += f"Стоп перемещён в +{BE_OFFSET_R}R ({pos.stop_loss:.6f})\n"
+            if BE_OFFSET_R == 0:
+                msg += f"Стоп перемещён в BE ({pos.stop_loss:.6f})\n"
+            else:
+                msg += f"Стоп перемещён в +{BE_OFFSET_R}R ({pos.stop_loss:.6f})\n"
         elif tp_num == 2:
             msg += f"Стоп перемещён в TP1 ({pos.stop_loss:.6f})\n"
         msg += f"Осталось: до TP{tp_num + 1}" if tp_num < 3 else ""

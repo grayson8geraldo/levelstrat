@@ -22,7 +22,7 @@ import urllib.error
 from telegram import Bot, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.constants import ParseMode
 
-from src.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID
+from src.config import TELEGRAM_BOT_TOKEN, TELEGRAM_CHAT_ID, TP1_PCT, TP2_PCT, TP3_PCT
 from src.signal_engine import Signal
 
 logger = logging.getLogger(__name__)
@@ -111,9 +111,9 @@ def format_signal(signal: Signal) -> str:
         f"\U0001f4cf <b>Уровень:</b>  {signal.level_price}\n"
         f"\U0001f6d1 <b>Стоп:</b>     {signal.stop_loss}  ({signal.risk_pct:.2%})\n"
         f"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
-        f"\U0001f3c1 <b>TP1 (30%):</b> {signal.tp1}\n"
-        f"\U0001f3c1 <b>TP2 (40%):</b> {signal.tp2}\n"
-        f"\U0001f3c1 <b>TP3 (30%):</b> {signal.tp3}\n"
+        f"\U0001f3c1 <b>TP1 ({TP1_PCT:.0%}):</b> {signal.tp1}\n"
+        f"\U0001f3c1 <b>TP2 ({TP2_PCT:.0%}):</b> {signal.tp2}\n"
+        f"\U0001f3c1 <b>TP3 ({TP3_PCT:.0%}):</b> {signal.tp3}\n"
         f"\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\u2500\n"
         f"\U0001f4c8 R:R = 1:{signal.rr_ratio} (нетто 1:{signal.rr_net})\n"
         f"\U0001f4aa Уровень: {signal.level_strength:.0f}/100 "
