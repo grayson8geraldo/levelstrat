@@ -24,7 +24,7 @@ from src.config import (
     RECOMMENDED_LEVERAGE, BLOCK_FULL_COUNTER_TREND, MIN_SIGNAL_SCORE,
     MOMENTUM_RSI_EXHAUSTION_LONG, MOMENTUM_RSI_EXHAUSTION_SHORT,
     MOMENTUM_RSI_PENALTY, MOMENTUM_VOLUME_FADE_PENALTY,
-    TOTAL_COST_PER_SIDE, BTC_TREND_PENALTY,
+    TOTAL_COST_PER_SIDE, BTC_TREND_PENALTY, MIN_RISK_PCT,
 )
 from src.diagonal_levels import DiagonalLevel, is_price_near_level
 from src.candle_patterns import detect_patterns, get_best_pattern
@@ -303,6 +303,13 @@ def evaluate_signal(
         tp3 = entry_price - stop_dist * TP3_R
 
     risk_pct = stop_dist / entry_price if entry_price > 0 else 0
+
+    # Reject trades with too-tight stops (noise territory, high fee impact)
+    if risk_pct < MIN_RISK_PCT:
+        logger.info(
+            f"  {symbol}: стоп {risk_pct:.2%} < мин. {MIN_RISK_PCT:.1%} — слишком узкий, пропущен"
+        )
+        return None
 
     # Real R:R based on weighted average TP
     weighted_tp_r = TP1_R * TP1_PCT + TP2_R * TP2_PCT + TP3_R * TP3_PCT
