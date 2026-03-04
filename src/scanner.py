@@ -40,7 +40,7 @@ from src.data_fetcher import DataFetcher
 from src.screener import CoinScreener
 from src.indicators import compute_indicators, get_trend_direction
 from src.diagonal_levels import detect_diagonal_levels
-from src.signal_engine import evaluate_signal
+from src.signal_engine import evaluate_signal, get_learner
 from src.notifier import TelegramNotifier
 from src.risk_tracker import RiskTracker
 from src.trade_journal import TradeJournal
@@ -109,6 +109,11 @@ class DLSScanner:
         # Step 0a: Check open positions (every POSITION_CHECK_INTERVAL)
         if self.monitor.should_check():
             self.monitor.check_all()
+
+            # Trigger self-learning recalculation if enough new trades
+            learner = get_learner()
+            if learner.should_recalculate():
+                learner.recalculate()
 
         # Step 0b: Check risk limits
         risk_state = self.risk_tracker.check_can_trade()
@@ -370,13 +375,25 @@ class DLSScanner:
 
     def run(self):
         """Run the scanner in a continuous loop."""
-        logger.info("DLS Scanner started (Enhanced v2.1)")
+        logger.info("DLS Scanner started (Enhanced v2.3)")
 
         # Start Telegram callback listener for close buttons
         self.notifier.start_callback_listener()
 
+        # Show self-learning status
+        learner = get_learner()
+        adj = learner.get_adjustments()
+        learning_status = ""
+        if adj and adj.get("sample_size", 0) >= 10:
+            learning_status = (
+                f"\n\U0001f9e0 Самообучение: {adj['sample_size']} сделок, "
+                f"WR={adj.get('overall_win_rate', 0):.0%}"
+            )
+        else:
+            learning_status = "\n\U0001f9e0 Самообучение: ожидание данных"
+
         self.notifier.send_status_sync(
-            "\U0001f680 <b>DLS Scanner v2.2 запущен</b>\n\n"
+            "\U0001f680 <b>DLS Scanner v2.3 запущен</b>\n\n"
             "\u2705 Возможности:\n"
             "  \u2022 Ранжирование сигналов (лучшие первые)\n"
             "  \u2022 Авто-трекинг позиций (TP/SL/time stop)\n"
@@ -384,8 +401,10 @@ class DLSScanner:
             "  \u2022 Фандинг + OI фильтр\n"
             "  \u2022 Риск-трекер (дневные/недельные лимиты)\n"
             "  \u2022 Композитный скоринг (A+/A/B/C)\n"
+            "  \u2022 Самообучение (адаптивные штрафы)\n"
             "\n"
-            f"Макс. позиций: {MAX_OPEN_POSITIONS}\n"
+            f"{learning_status}\n"
+            f"\nМакс. позиций: {MAX_OPEN_POSITIONS}\n"
             f"Сканирование каждые {SCAN_INTERVAL_SECONDS} сек.\n"
             "Биржа: Bybit USDT-M Perpetual"
         )

@@ -25,7 +25,9 @@ from src.config import (
     MOMENTUM_RSI_EXHAUSTION_LONG, MOMENTUM_RSI_EXHAUSTION_SHORT,
     MOMENTUM_RSI_PENALTY, MOMENTUM_VOLUME_FADE_PENALTY,
     TOTAL_COST_PER_SIDE, BTC_TREND_PENALTY, MIN_RISK_PCT,
+    NO_VOLUME_PENALTY,
 )
+from src.self_learning import SelfLearning
 from src.diagonal_levels import DiagonalLevel, is_price_near_level
 from src.candle_patterns import detect_patterns, get_best_pattern
 from src.indicators import detect_rsi_divergence, get_trend_direction
@@ -34,6 +36,9 @@ from src.derivatives_filter import analyze_derivatives, DerivativesContext
 from src.pump_trading import detect_pump, PumpAnalysis
 
 logger = logging.getLogger(__name__)
+
+# Module-level learner (loaded once, recalculated periodically from scanner)
+_learner = SelfLearning()
 
 
 @dataclass
@@ -115,6 +120,11 @@ def _grade_signal(score: float) -> str:
     elif score >= 35:
         return "C"
     return "D"
+
+
+def get_learner() -> SelfLearning:
+    """Return the module-level self-learning instance."""
+    return _learner
 
 
 def evaluate_signal(
@@ -376,6 +386,14 @@ def evaluate_signal(
             f"текущий={current_vol_ratio:.2f}x) — штраф -{MOMENTUM_VOLUME_FADE_PENALTY}"
         )
 
+    # 3. No volume confirmation: strongly correlated with losses
+    if not confirmations.get("volume", False):
+        momentum_penalty += NO_VOLUME_PENALTY
+        logger.info(
+            f"  {symbol}: нет объёма (vol_ratio={vol_ratio:.2f}x < {VOLUME_SURGE_MULT}x) "
+            f"— штраф -{NO_VOLUME_PENALTY}"
+        )
+
     # ── BTC directional filter ─────────────────────────────────
     btc_penalty = 0.0
     btc_counter = False
@@ -402,6 +420,20 @@ def evaluate_signal(
     )
     # Apply momentum + BTC penalties
     composite = max(0, composite - momentum_penalty - btc_penalty)
+
+    # Apply self-learning adaptive penalty
+    learned_penalty = _learner.get_signal_adjustment({
+        "confirmations": confirmations,
+        "num_confirmations": num_conf,
+        "direction": direction,
+        "trend_4h": trend_4h,
+        "trend_1h": trend_1h,
+        "trend_15m": trend_15m,
+        "confluence_score": confluence.score,
+        "rsi_value": rsi,
+    })
+    composite = max(0, composite - learned_penalty)
+
     grade = _grade_signal(composite)
 
     # ── Minimum score filter ─────────────────────────────────

@@ -113,6 +113,13 @@ MOMENTUM_RSI_EXHAUSTION_LONG = 65    # RSI above this for LONG = rally may be ex
 MOMENTUM_RSI_EXHAUSTION_SHORT = 35   # RSI below this for SHORT = sell-off may be exhausted
 MOMENTUM_RSI_PENALTY = 8             # Composite score penalty for RSI exhaustion
 MOMENTUM_VOLUME_FADE_PENALTY = 4     # Penalty when volume surge was historical, not current
+NO_VOLUME_PENALTY = 8                # Penalty when volume confirmation missing (correlated with losses)
+
+# ── Self-Learning ──────────────────────────────────────
+LEARNING_MIN_TRADES = 10             # Min closed trades before learning kicks in
+LEARNING_RECALC_INTERVAL = 5         # Recalculate after every N new closed trades
+LEARNING_MAX_PENALTY = 15            # Max penalty any single learned factor can apply
+LEARNING_DATA_PATH = "data/learned_adjustments.json"
 
 # ── Pump Detection ─────────────────────────────────────────
 PUMP_MIN_MOVE_PCT = 0.10             # 10% minimum move
