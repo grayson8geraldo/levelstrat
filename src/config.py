@@ -114,6 +114,7 @@ MOMENTUM_RSI_EXHAUSTION_SHORT = 35   # RSI below this for SHORT = sell-off may b
 MOMENTUM_RSI_PENALTY = 8             # Composite score penalty for RSI exhaustion
 MOMENTUM_VOLUME_FADE_PENALTY = 4     # Penalty when volume surge was historical, not current
 NO_VOLUME_PENALTY = 8                # Penalty when volume confirmation missing (correlated with losses)
+ENTRY_TF_AGAINST_PENALTY = 10        # Penalty when 15m (working TF) trend opposes trade direction
 
 # ── Self-Learning ──────────────────────────────────────
 LEARNING_MIN_TRADES = 10             # Min closed trades before learning kicks in

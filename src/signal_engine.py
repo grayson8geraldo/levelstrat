@@ -25,7 +25,7 @@ from src.config import (
     MOMENTUM_RSI_EXHAUSTION_LONG, MOMENTUM_RSI_EXHAUSTION_SHORT,
     MOMENTUM_RSI_PENALTY, MOMENTUM_VOLUME_FADE_PENALTY,
     TOTAL_COST_PER_SIDE, BTC_TREND_PENALTY, MIN_RISK_PCT,
-    NO_VOLUME_PENALTY,
+    NO_VOLUME_PENALTY, ENTRY_TF_AGAINST_PENALTY,
 )
 from src.self_learning import SelfLearning
 from src.diagonal_levels import DiagonalLevel, is_price_near_level
@@ -336,18 +336,18 @@ def evaluate_signal(
         (direction == "SHORT" and trend_1h == "bullish")
     )
 
-    # Block signal when ALL timeframes agree against the direction
+    # Block signal when higher timeframes (4H + 1H) both agree against direction
     if BLOCK_FULL_COUNTER_TREND and is_counter_trend:
-        all_against = (
+        higher_tf_against = (
             (direction == "LONG" and trend_4h == "bearish"
-             and trend_1h == "bearish" and trend_15m == "bearish") or
+             and trend_1h == "bearish") or
             (direction == "SHORT" and trend_4h == "bullish"
-             and trend_1h == "bullish" and trend_15m == "bullish")
+             and trend_1h == "bullish")
         )
-        if all_against:
+        if higher_tf_against:
             logger.info(
-                f"  {symbol}: блок полного контр-тренда — "
-                f"{direction} при 4H={trend_4h} 1H={trend_1h} 15m={trend_15m}"
+                f"  {symbol}: блок контр-тренда — "
+                f"{direction} при 4H={trend_4h} 1H={trend_1h} (старшие ТФ против)"
             )
             return None
 
@@ -392,6 +392,18 @@ def evaluate_signal(
         logger.info(
             f"  {symbol}: нет объёма (vol_ratio={vol_ratio:.2f}x < {VOLUME_SURGE_MULT}x) "
             f"— штраф -{NO_VOLUME_PENALTY}"
+        )
+
+    # 4. Working timeframe (15m) trend against trade direction
+    entry_tf_against = (
+        (direction == "LONG" and trend_15m == "bearish") or
+        (direction == "SHORT" and trend_15m == "bullish")
+    )
+    if entry_tf_against:
+        momentum_penalty += ENTRY_TF_AGAINST_PENALTY
+        logger.info(
+            f"  {symbol}: рабочий ТФ против ({direction} при 15m={trend_15m}) "
+            f"— штраф -{ENTRY_TF_AGAINST_PENALTY}"
         )
 
     # ── BTC directional filter ─────────────────────────────────
